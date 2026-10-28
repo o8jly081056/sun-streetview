@@ -912,6 +912,8 @@ function drawCompass() {
 
 /* ---------- 時間色帶 ---------- */
 const TB_SOFT = '#9aa0a6';
+// 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
+const SUNNY_MIN = .3;
 function drawBands() {
   const [W, H] = fitCanvas(bands);
   bctx.clearRect(0, 0, W, H);
@@ -920,7 +922,7 @@ function drawBands() {
     const s = sunAt(m + step / 2);
     let c = state.sv ? classify(s, state.heading) : classifyAlt(s);
     // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光（灰）；夜間維持深色
-    if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < .2 || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
+    if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < SUNNY_MIN || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
     bctx.fillStyle = cssVar(c.color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
   }
@@ -1445,7 +1447,7 @@ function drawLight() {
   // 太陽高時差異只減半、不會消失；雲遮住太陽就沒有差異
   const relSun = norm180(s.azimuth - v.heading), face = Math.cos(relSun * rad);
   // 方向感強度：只有真正陰天（直射光 < 20%）才拿掉；局部多雲時太陽隨時會露臉，至少保留 75%
-  const dEff = wx.direct < .2 ? wx.direct : Math.max(wx.direct, .75);
+  const dEff = wx.direct < SUNNY_MIN ? wx.direct : Math.max(wx.direct, .75);
   const dirStr = alt > 0 ? dEff * Math.min(1, alt / 4) * (.6 + .4 * (1 - Math.min(alt, 70) / 70)) : 0;
   // 建築遮擋：主體（正前方立面）在別棟大樓的影子裡，就沒有順光的鮮豔感
   const sh = !ENABLE_3D && alt > 0 ? shadeState() : null;
@@ -1622,10 +1624,10 @@ function lightSummary(alt, minutes) {
 function goodRanges(heading, at = state.focus) {
   const good = []; let start = null;
   for (let m = 0; m <= 1440; m += 5) {
-    const k = m < 1440 ? classify(sunAt(m, at), heading).key : 'night';
+    const k = m < 1440 ? classify(sunAt(m + 2.5, at), heading).key : 'night';   // 取 5 分鐘的中間點，跟時間軸一致
     const ok = k === 'front' || k === 'side';
     if (ok && start === null) start = m;
-    if (!ok && start !== null) { if (m - start >= 15) good.push([start, m]); start = null; }
+    if (!ok && start !== null) { good.push([start, m]); start = null; }   // 不設最短長度，跟時間軸的綠／黃色段完全一致
   }
   return good;
 }
@@ -1635,9 +1637,9 @@ function splitByWeather(ranges, at = state.focus) {
   for (const [a, b] of ranges) {
     let s0 = a, cur = null;
     for (let m = a; m <= b; m += 5) {
-      const sunny = m < b ? wxFactors(wxAt(m, at)).direct >= .35 : null;
+      const sunny = m < b ? wxFactors(wxAt(m + 2.5, at)).direct >= SUNNY_MIN : null;
       if (cur === null) cur = sunny;
-      if (m === b || sunny !== cur) { if (m - s0 >= 10) out.push({ a: s0, b: m, sunny: cur }); s0 = m; cur = sunny; }
+      if (m === b || sunny !== cur) { if (m > s0) out.push({ a: s0, b: m, sunny: cur }); s0 = m; cur = sunny; }
     }
   }
   return out;
@@ -1671,9 +1673,9 @@ function dayPlan(at, heading, date) {
 function splitByShade(seg) {
   const out = []; let s0 = seg.a, cur = null;
   for (let m = seg.a; m <= seg.b; m += 5) {
-    const lit = m < seg.b ? !subjectShaded(m) : null;
+    const lit = m < seg.b ? !subjectShaded(m + 2.5) : null;
     if (cur === null) cur = lit;
-    if (m === seg.b || lit !== cur) { if (m - s0 >= 10) out.push({ a: s0, b: m, sunny: cur, shade: !cur }); s0 = m; cur = lit; }
+    if (m === seg.b || lit !== cur) { if (m > s0) out.push({ a: s0, b: m, sunny: cur, shade: !cur }); s0 = m; cur = lit; }
   }
   return out;
 }
@@ -1807,11 +1809,11 @@ function updateInfo() {
     const w = wxAt(), wf = wxFactors(w);
     clearTimeout(weekT); weekT = setTimeout(renderWeek, 250);
     $('svDate').textContent = state.panoDate ? `街景拍攝於 ${fmtYM(state.panoDate)}（最新版本）` : '';
-    $('wxInfo').textContent = wxText(w) + (c.key !== 'night' && wf.direct >= .2 && wf.direct < .6 ? ' · 陽光時有時無' : '');
+    $('wxInfo').textContent = wxText(w) + (c.key !== 'night' && wf.direct >= SUNNY_MIN && wf.direct < .6 ? ' · 陽光時有時無' : '');
     const manualWx = state.opts.wx && state.opts.wx !== 'auto';
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
     $('svWx').classList.toggle('on', manualWx);
-    const diffuse = c.key !== 'night' && wf.direct < .2;
+    const diffuse = c.key !== 'night' && wf.direct < SUNNY_MIN;
     $('badge').querySelector('.dot').style.background = diffuse ? '#9aa0a6' : c.color;
     if (diffuse) {
       // 雲遮住太陽：沒有明顯的順逆光，光線柔和
@@ -2313,7 +2315,12 @@ function renderWeek() {
   for (let i = 0; i < 7; i++) {
     const d = addDays(today, i), p = dayPlan(at, h, d);
     const loading = p.src === 'loading';
-    const bar = p.sunny.map(x => `<i style="left:${(x.a - 300) / 900 * 100}%;width:${(x.b - x.a) / 900 * 100}%"></i>`).join('');   // 05:00–20:00
+    // 小色條（05:00–20:00）：跟時間軸同色，綠＝順光、黃＝側光，只畫建議時段
+    const bar = withCtx({ date: d, focus: at, heading: h }, () => p.sunny.flatMap(x => {
+      const out = [];
+      for (let m = x.a; m < x.b; m += 5) out.push(`<i style="left:${(m - 300) / 900 * 100}%;width:${5 / 900 * 100 + .2}%;background:${classify(sunAt(m + 2.5, at), h).key === 'front' ? 'var(--front)' : 'var(--sidelit)'}"></i>`);
+      return out;
+    })).join('');
     const best = loading ? '<span class="none">取得天氣中…</span>'
       : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
       : p.good.length ? '<span class="none">順光時段預報多雲或被擋住</span>' : '<span class="none">這個角度不會順光</span>';
