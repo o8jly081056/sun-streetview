@@ -70,6 +70,7 @@
     z-index: 11; display: none; pointer-events: none; transition: box-shadow .15s; }
   body.side-open.head-on #sideHead { display: block; }
   body.side-open.head-line #sideHead { box-shadow: 0 1px 0 var(--line); }
+  #sheetGrip, #fabLoc, #mLayers { display: none; }
   #sideToggle { position: absolute; top: 50%; left: var(--mapLeft); transform: translateY(-50%); z-index: 9; width: 23px; height: 48px;
     background: #fff; border-radius: 0 8px 8px 0; box-shadow: var(--elev1); display: none; align-items: center; justify-content: center; color: var(--icon); }
   body.side-open #sideToggle { background: var(--surface); box-shadow: none; }
@@ -371,13 +372,44 @@
     #rail { display: none; }
     #mMenu { display: flex; }
     #searchBox { left: 8px; right: 8px; width: auto; top: 8px; }
-    #side { top: auto; left: 0; height: 52vh; border-radius: 24px 24px 0 0; padding-top: 12px; bottom: 0; box-shadow: var(--elev2); }
+    /* 手機：可拖曳的底部面板（跟 Google 地圖 App 一樣：小／一半／全螢幕三段，往下滑關閉） */
+    #side { top: auto; left: 0; right: 0; width: 100vw; height: var(--sheetH, 46vh); border-radius: 24px 24px 0 0; padding-top: 0; bottom: 0;
+      box-shadow: 0 -2px 10px rgba(0,0,0,.15); transition: height .25s cubic-bezier(.2,.8,.2,1); overscroll-behavior: contain; }
+    body.sheet-drag #side { transition: none; }
+    #sheetGrip { display: flex !important; position: sticky; top: 0; z-index: 2; height: 24px; align-items: center; justify-content: center; background: #fff; touch-action: none; cursor: grab; }
+    #sheetGrip span { width: 32px; height: 4px; border-radius: 2px; background: #c4c7c5; }
+    #view-place > .pad, .view-head { touch-action: none; }   /* 在標題區上下拖也能拉動面板 */
+    /* 地點面板：標題 → 膠囊按鈕列 → 照片 → 其他資訊 */
+    #view-place.on { display: flex; flex-direction: column; }
+    #view-place > * { order: 4; }
+    #view-place > .pad { order: 1; }
+    #view-place > .actions { order: 2; }
+    #view-place > .hero { order: 3; margin: 8px 16px 4px; height: 168px; border-radius: 12px; overflow: hidden; }
+    .ptitle { margin-top: 4px; }
+    .actions { justify-content: flex-start; gap: 8px; overflow-x: auto; padding: 12px 16px 8px; scrollbar-width: none; }
+    .actions::-webkit-scrollbar { display: none; }
+    .act { flex: none; flex-direction: row; gap: 6px; width: auto; height: 36px; padding: 0 16px 0 12px; border: 1px solid #c4c7c5; border-radius: 18px; font-size: 14px; line-height: 20px; color: var(--on-tonal); }
+    .act .circle { width: auto; height: auto; margin: 0; background: none !important; }
+    .act.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .act.primary .circle { color: #fff; }
+    /* 地圖按鈕：手機用手指縮放，不放 + − 和街景小人；圖層在右上、我的位置在右下且跟著面板高度移動 */
+    #map .gm-bundled-control, #map .gm-svpc, #map .gm-btn { display: none !important; }
+    #fabLoc, #mLayers { display: flex; position: fixed; z-index: 9; width: 48px; height: 48px; border-radius: 50%; background: #fff; box-shadow: var(--elev2);
+      align-items: center; justify-content: center; color: var(--icon); transition: bottom .25s cubic-bezier(.2,.8,.2,1); }
+    #fabLoc { right: 12px; bottom: 24px; }
+    body.side-open:not(.sv) #fabLoc { bottom: calc(var(--sheetH, 46vh) + 12px); }
+    body.sheet-drag #fabLoc { transition: none; }
+    #mLayers { right: 12px; top: 68px; width: 40px; height: 40px; }
+    #layerTile { display: none; }
+    body.layers-open #layerTile { display: flex; top: 116px; right: 12px; left: auto; bottom: auto; position: fixed; }
+    body.layers-open #layerMain { display: none; }
+    body.layers-open #layerMore { display: flex; }
+    body.sv #fabLoc, body.sv #mLayers, body.sv #layerTile { display: none !important; }
     #shell, #sideHead { display: none !important; }
     .hero { margin-top: -12px; height: 180px; border-radius: 24px 24px 0 0; }
     #sideToggle { display: none !important; }
     #timebar, body.dark #timebar, body.side-open #timebar { left: 8px; right: 8px; width: auto; transform: none; min-width: 0; bottom: 8px; padding: 8px 10px; }
     body.side-open:not(.sv) #timebar { display: none; }
-    #layerTile { bottom: 150px; left: 8px; }
     body.sv #map { width: 120px; height: 90px; left: 8px; bottom: 132px; }
     #svTop { width: calc(100vw - 108px); left: 8px; top: 8px; gap: 6px; }
     .sv-card { padding: 6px 10px 8px 2px; }
@@ -457,6 +489,7 @@
 </nav>
 
 <div id="side">
+  <div id="sheetGrip" aria-label="拖曳調整面板高度"><span></span></div>
   <div class="view" id="view-place"></div>
   <div class="view" id="view-sun"></div>
   <div class="view" id="view-saved"></div>
@@ -491,6 +524,8 @@
 </div>
 <div id="scrim"></div>
 
+<button id="fabLoc" title="顯示你的位置" data-icon="my_location"></button>
+<button id="mLayers" title="圖層" data-icon="layers"></button>
 <div id="layerTile">
   <button id="layerMain" title="切換圖層"><span class="thumb"></span><span class="lbl" data-icon="layers" data-size="14"><span id="layerLbl">衛星</span></span></button>
   <div id="layerMore">
@@ -2359,12 +2394,59 @@ function openSide(view) {
   ({ place: renderPlace, sun: renderSunView, saved: renderSaved, list: renderListDetail })[view]();
   $('side').scrollTop = 0;
   syncSideHead();
+  if (isPhone()) sheetTo(view === 'place' ? 'peek' : 'half');   // 手機：地點先開小的，其他面板開一半
   render({ bandsToo: true });
 }
 function closeSide() {
   document.body.classList.remove('side-open');
   render({ bandsToo: true });
 }
+/* ---- 手機底部面板：拖曳握把或在面板頂端往上下滑，放開後停在最近的段落；往下滑到底就關閉 ---- */
+const isPhone = () => matchMedia('(max-width: 760px)').matches;
+const sheetStops = () => { const H = innerHeight; return { peek: Math.min(260, H * .34), half: H * .5, full: H - 64 }; };
+function setSheet(h, animate = true) {
+  document.body.classList.toggle('sheet-drag', !animate);
+  document.body.style.setProperty('--sheetH', Math.round(h) + 'px');
+  state.sheetH = h;
+}
+function sheetTo(name) { const st = sheetStops(); state.sheetStop = name; setSheet(st[name]); }
+(() => {
+  const side = $('side'); let drag = null;
+  const start = e => {
+    if (!isPhone() || !document.body.classList.contains('side-open')) return;
+    const onGrip = !!e.target.closest('#sheetGrip');
+    // 面板沒有捲動時，在上半部往下拖也能收合；面板還沒全開時往上拖會展開
+    if (!onGrip && (side.scrollTop > 0 || e.clientY - side.getBoundingClientRect().top > 140)) return;
+    drag = { y: e.clientY, h: state.sheetH || side.offsetHeight, t: performance.now(), moved: false, id: e.pointerId };
+  };
+  const move = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.abs(dy) < 6) return;
+    if (!drag.moved) { drag.moved = true; try { side.setPointerCapture(e.pointerId); } catch {} }
+    e.preventDefault();
+    const st = sheetStops();
+    setSheet(Math.max(60, Math.min(st.full, drag.h - dy)), false);
+  };
+  const end = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    if (!d.moved) { document.body.classList.remove('sheet-drag'); return; }
+    const st = sheetStops(), h = state.sheetH, v = (d.y - e.clientY) / Math.max(1, performance.now() - d.t);   // 往上為正（px/ms）
+    if (h < st.peek * .7 || v < -1.2 && h < st.half) { setSheet(st.peek); state.view === 'place' ? clearSelection() : closeSide(); return; }
+    const target = v > .6 ? (h < st.half ? 'half' : 'full') : v < -.6 ? (h > st.half ? 'half' : 'peek')
+      : ['peek', 'half', 'full'].reduce((a, b) => Math.abs(st[b] - h) < Math.abs(st[a] - h) ? b : a);
+    sheetTo(target);
+  };
+  side.addEventListener('pointerdown', start);
+  side.addEventListener('pointermove', move, { passive: false });
+  side.addEventListener('pointerup', end); side.addEventListener('pointercancel', end);
+  addEventListener('resize', () => { if (isPhone() && state.sheetStop) sheetTo(state.sheetStop); });
+})();
+// 手機：我的位置浮動鈕、右上圖層鈕
+$('fabLoc').addEventListener('click', () => locateMe());
+$('mLayers').addEventListener('click', e => { e.stopPropagation(); document.body.classList.toggle('layers-open'); });
+document.addEventListener('click', e => { if (!e.target.closest('#layerTile, #mLayers')) document.body.classList.remove('layers-open'); });
 // 捲動時：照片捲到搜尋框後面就顯示白色頂欄；沒有照片的面板一捲動就顯示
 function syncSideHead() {
   const side = $('side'), view = side.querySelector('.view.on'), hero = view?.querySelector('.hero');
