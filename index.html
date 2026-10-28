@@ -922,7 +922,7 @@ function drawCompass() {
 }
 
 /* ---------- 時間色帶 ---------- */
-const TB_SOFT = '#9aa0a6';
+const TB_SOFT = '#9aa0a6', TB_INDOOR = '#e6c15a';   // 柔光、人工照明（隧道／室內）
 // 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
 const SUNNY_MIN = .3;
 function drawBands() {
@@ -933,7 +933,8 @@ function drawBands() {
     const s = sunAt(m + step / 2);
     let c = state.sv ? classify(s, state.heading) : classifyAlt(s);
     // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光（灰）；夜間維持深色
-    if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < SUNNY_MIN || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
+    if (state.sv && isCovered()) c = { color: TB_INDOOR };
+    else if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < SUNNY_MIN || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
     bctx.fillStyle = cssVar(c.color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
   }
@@ -945,7 +946,8 @@ function drawBands() {
   }
   drawSunlit();
   const items = state.sv
-    ? [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光']]
+    ? (isCovered() ? [[TB_INDOOR, '人工照明（隧道／室內，不受日照影響）']]
+      : [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光']])
     : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
   $('legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
     (state.sv ? (ENABLE_3D ? '<span><i style="background:#fde293;border-radius:1px"></i>細條＝直射陽光</span><span><i style="background:#5f6368;border-radius:1px"></i>被建築遮住</span>' : '') : '');
@@ -1426,6 +1428,48 @@ function drawLamps(W, H, v, nightK, wx, base) {
   }
 }
 
+/* ---------- 隧道／地下道／室內：人工照明，不受日照與天氣影響 ---------- */
+// 判斷依據：① 街景地點名稱（地下道、隧道、車站…）② OpenStreetMap 有頂蓋的道路（tunnel、covered、indoor），
+// 街景點 6 公尺內有一條、且走向跟街景的道路方向一致（避免把隧道正上方交叉的路面誤判）
+const COVER = { idx: null, tiles: new Map(), key: '', val: false };
+fetch('lights/tunnel-index.json').then(r => r.json()).then(a => { COVER.idx = new Set(a); COVER.key = ''; render({ bandsToo: true }); })
+  .catch(() => { COVER.idx = new Set(); });
+const COVER_WORDS = /隧道|地下道|地下街|地下停車|停車場|車站|月台|穿堂|轉運站|地下通道|涵洞/;
+function coverTile(cy, cx) {
+  const k = `${cy}_${cx}`;
+  if (!COVER.idx || !COVER.idx.has(k)) return [];
+  if (!COVER.tiles.has(k)) {
+    COVER.tiles.set(k, []);
+    fetch(`lights/tunnel/${k}.json`).then(r => r.json()).then(a => { COVER.tiles.set(k, a); COVER.key = ''; render({ bandsToo: true }); }).catch(() => {});
+  }
+  return COVER.tiles.get(k);
+}
+function isCovered(at = state.focus) {
+  if (!state.sv) return false;
+  const desc = pano?.getLocation?.()?.description || '';
+  const links = (pano?.getLinks?.() || []).map(l => l.heading);
+  const key = `${at.lat.toFixed(6)},${at.lng.toFixed(6)},${desc},${COVER.tiles.size},${links.join()}`;
+  if (key === COVER.key) return COVER.val;
+  let val = COVER_WORDS.test(desc);
+  if (!val) {
+    const cy = Math.floor(at.lat * 100), cx = Math.floor(at.lng * 100), mLat = 111320, mLng = 111320 * Math.cos(at.lat * rad);
+    outer:
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const line of coverTile(cy + dy, cx + dx)) {
+      for (let i = 0; i + 3 < line.length; i += 2) {
+        const ax = (line[i + 1] / 1e5 - at.lng) * mLng, ay = (line[i] / 1e5 - at.lat) * mLat;
+        const bx = (line[i + 3] / 1e5 - at.lng) * mLng, by = (line[i + 2] / 1e5 - at.lat) * mLat;
+        const ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey || 1e-9;
+        const t = Math.max(0, Math.min(1, -(ax * ex + ay * ey) / L2));
+        if (Math.hypot(ax + ex * t, ay + ey * t) > 6) continue;
+        const segAz = (Math.atan2(ex, ey) / rad + 360) % 360;
+        if (!links.length || links.some(h => Math.abs(norm180(h - segAz)) < 25 || Math.abs(norm180(h - segAz - 180)) < 25)) { val = true; break outer; }
+      }
+    }
+  }
+  COVER.key = key; COVER.val = val;
+  return val;
+}
+
 const shadeC = $('shade'), sctx = shadeC.getContext('2d');
 const glowC = $('glow'), gctx = glowC.getContext('2d');
 function drawLight() {
@@ -1433,6 +1477,13 @@ function drawLight() {
   sctx.clearRect(0, 0, W, H); gctx.clearRect(0, 0, W, H);
   const panoEl = $('pano');
   if (!state.sv || !state.opts.tint) { panoEl.style.filter = ''; setRain(0); return; }
+  if (isCovered()) {
+    // 隧道／室內：日夜都是燈光，亮度固定、略帶燈色；沒有太陽、雨、霧、月亮
+    panoEl.style.filter = 'brightness(.97) contrast(1.03) saturate(.92) sepia(.08)';
+    sctx.fillStyle = 'rgb(255,246,232)'; sctx.fillRect(0, 0, W, H);
+    setRain(0);
+    return;
+  }
   const s = sunAt(state.minutes), alt = s.altitude, v = pov();
   let [, br, ct, sat, warm, base] = gradeAt(alt);
   // 天氣：雲越厚，反差、飽和、暖色越低，底色往冷灰靠；下雨再壓暗、偏冷
@@ -1856,6 +1907,15 @@ function updateInfo() {
       : sunny.length === segs.length ? `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}`
       : sunny.length ? `晴朗又順光：${sunny.map(x => tjump(x.a, x.b)).join('、')}<span class="sub">（其餘時段${segs.some(x => x.shade) ? '被建築擋住或' : ''}預報多雲）</span>`
       : `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（但預報多雲，光線偏柔）</span>`) + tail;
+    if (isCovered()) {
+      // 隧道／室內：資訊改成人工照明的說明
+      $('badge').querySelector('.dot').style.background = TB_INDOOR;
+      $('badgeText').textContent = '人工照明 · 隧道／室內';
+      $('lightInfo').textContent = `${fmtMin(now)} · 不受日照影響，白天晚上亮度相同`;
+      $('wxInfo').textContent = '有頂蓋遮蔽，不受天氣影響';
+      $('shadeInfo').textContent = ''; $('shadeInfo').className = '';
+      $('adviceText').innerHTML = '照明固定，任何時間拍都一樣<br><span class="sub">靠近出入口時，外面的天光會造成強烈明暗對比</span>';
+    }
   }
   if (C3D.visible && C3D.viewer) {
     const ls = lightSummary(s.altitude, state.minutes);
