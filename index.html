@@ -123,6 +123,10 @@
   .trip-row:hover { background: var(--hover); }
   .trip-row .tm { width: 52px; flex: none; font: 500 15px/20px var(--font-title); color: var(--blue); font-variant-numeric: tabular-nums; }
   .trip-row .tm .sub { font-weight: 400; }
+  .tl-row { display: flex; gap: 16px; padding: 4px 24px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .tl-k { width: 32px; flex: none; color: var(--sub); }
+  .tl-arrow { color: #c4c7c5; margin: 0 6px; }
+  .tl-note { padding: 4px 24px 8px 72px; font-size: 12px; line-height: 16px; color: var(--sub); letter-spacing: .2px; }
   .cloudy .tjump { color: var(--sub); text-decoration: line-through; text-decoration-color: rgba(94,94,94,.4); }
   .row-btn { display: flex; align-items: center; gap: 20px; width: 100%; padding: 12px 24px; text-align: left; }
   .row-btn:hover { background: var(--hover); }
@@ -1707,18 +1711,22 @@ function sunRowsHtml(at) {
   const nextRow = cur ? infoRow('sun', `正在${cur.name}`, `到 ${fmtMin(cur.b)} 結束，還有 ${fmtDur(cur.b - now)}`)
     : next ? infoRow('sun', `下一段${next.name} ${tjump(next.a, next.b)}`, `再 ${fmtDur(next.a - now)}${cloudNote(next, at)}`)
     : infoRow('sun', '今天的金光、藍調都已結束', '換明天的日期再看');
-  const cell = w => w ? tjump(w.a, w.b) : '—';
   const [bm, gm, ge, be] = ['晨間藍調', '晨間金光', '傍晚金光', '傍晚藍調'].map(n => ws.find(w => w.name === n));
+  const showCloud = ge && !/longrange|none|loading|manual/.test(wxAt(ge.a, at).src);
+  // 一條時間線：早上「藍調 → 日出 → 金光結束」、傍晚「金光開始 → 日落 → 藍調結束」
+  const line = (label, parts) => `<div class="tl-row"><span class="tl-k">${label}</span><span>${parts.filter(Boolean).join('<span class="tl-arrow">→</span>')}</span></div>`;
   return nowRow + nextRow + `
     <div class="divider"></div>
     <div class="sec-title">今天的好光</div>
-    <div class="light-grid">
-      <div></div><div class="h">早上</div><div class="h">傍晚</div>
-      <div class="d"><i style="background:var(--bluehr)"></i>藍調</div><div>${cell(bm)}</div><div>${cell(be)}</div>
-      <div class="d"><i style="background:var(--golden)"></i>金光</div><div>${cell(gm)}</div><div>${cell(ge)}</div>
-      <div class="d"><i style="background:#fbbc04;border-radius:2px"></i>日出／日落</div><div>${tjump(msMin(t.sunrise))}</div><div>${tjump(msMin(t.sunset))}</div>
-      ${gm && ge && wxAt(0, at).src !== 'manual' && !/longrange|none|loading/.test(wxAt(gm.a, at).src) ? `<div class="d">金光時雲量</div><div>${cloudCell(gm, at)}</div><div>${cloudCell(ge, at)}</div>` : ''}
-    </div>`;
+    ${line('早上', [bm && `藍調 ${tjump(bm.a)}`, `日出 ${tjump(msMin(t.sunrise))}`, gm && `金光到 ${tjump(gm.b)}`])}
+    ${line('傍晚', [ge && `金光 ${tjump(ge.a)}`, `日落 ${tjump(msMin(t.sunset))}`, be && `藍調到 ${tjump(be.b)}`])}
+    ${showCloud ? `<div class="tl-note">${sunsetNote(ge, at)}</div>` : ''}`;
+}
+// 夕陽好不好看的一句話
+function sunsetNote(w, at) {
+  const { c, rain, low } = cloudAt(w, at);
+  return rain ? `傍晚可能下雨（雲量 ${c}%）` : low > 80 ? `傍晚低雲厚（${c}%），不太會看到夕陽` : c >= 30 && c <= 75 ? `傍晚雲量 ${c}%，有機會火燒雲`
+    : c < 30 ? `傍晚晴朗（雲量 ${c}%），夕陽清楚但天空較單調` : `傍晚偏陰（雲量 ${c}%）`;
 }
 // 今天的月出、月落（每 5 分鐘掃一次高度變化）
 function moonTimes(at = state.focus) {
@@ -1731,9 +1739,9 @@ function moonTimes(at = state.focus) {
   }
   return { rise, set };
 }
-// 夜拍整理：藍調、路燈點燈、月亮、晚上的天氣
+// 夜拍整理：路燈點燈、月亮、晚上的天氣（藍調已在「今天的好光」）
 function nightHtml(at) {
-  const ws = goldenWindows(at), be = ws.find(w => w.name === '傍晚藍調'), lt = lampTimes(at), mt = moonTimes(at);
+  const lt = lampTimes(at), mt = moonTimes(at);
   const mo = moonAt(1260, at), ph = `${moonName(mo.phase)} ${Math.round(mo.fraction * 100)}%`;
   let cloud = 0, rain = 0, pop = null, n = 0, src = '';
   for (let m = 1110; m <= 1380; m += 30) { const w = wxAt(m, at); cloud += w.cloud; rain += w.precip || 0; if (w.pop != null) pop = Math.max(pop ?? 0, w.pop); n++; src = w.src; }
@@ -1741,42 +1749,34 @@ function nightHtml(at) {
   const wxLine = /loading/.test(src) ? '取得天氣中…' : /longrange|none/.test(src) ? '沒有預報，以晴天估計' :
     `雲量約 ${cloud}%${pop != null ? ` · 降雨機率 ${pop}%` : rain >= .5 ? ` · 雨量 ${rain.toFixed(1)} mm` : ''}` +
     (rain >= .5 || (pop ?? 0) >= 60 ? '（地面濕，有倒影可拍）' : cloud < 40 ? '（天空乾淨）' : '');
-  const moonLine = `${mt.rise != null ? `月出 ${tjump(mt.rise)}` : '今天不升起'} · ${mt.set != null ? `月落 ${tjump(mt.set)}` : '今天不落下'}`;
   return `<div class="divider"></div><div class="sec-title">夜拍</div>
     <div class="light-grid" style="grid-template-columns:96px 1fr">
-      <div class="d"><i style="background:var(--bluehr)"></i>藍調</div><div>${be ? tjump(be.a, be.b) : '—'}</div>
       <div class="d"><i style="background:#fde293"></i>路燈點燈</div><div>${lt.on != null ? `約 ${tjump(lt.on)}` : '—'}</div>
-      <div class="d"><i style="background:#e8eaed;border:1px solid #c4c7c5"></i>月亮</div><div>${ph}<br><span class="sub">${moonLine}</span></div>
+      <div class="d"><i style="background:#e8eaed;border:1px solid #c4c7c5"></i>月亮</div><div>${ph}${mt.rise != null ? `，${tjump(mt.rise)} 升起` : ''}</div>
       <div class="d"><i style="background:#9aa0a6"></i>晚上天氣</div><div>${wxLine}</div>
     </div>`;
 }
 // 金光時段的雲量：雲太多看不到夕陽、適量的高雲最容易有火燒雲
 function cloudAt(w, at) { const x = wxAt(Math.round((w.a + w.b) / 2), at); return { c: Math.round(x.cloud), rain: x.precip >= .2, low: x.low }; }
-function cloudCell(w, at) {
-  const { c, rain, low } = cloudAt(w, at);
-  const tip = rain ? '下雨' : low > 80 ? '低雲厚，難見太陽' : c >= 30 && c <= 75 ? '有機會火燒雲' : c < 30 ? '晴朗' : '偏陰';
-  return `${c}%<span class="sub"> ${tip}</span>`;
-}
 function cloudNote(w, at) {
   const x = wxAt(Math.round((w.a + w.b) / 2), at);
   return /longrange|none|loading|manual/.test(x.src) ? '' : ` · 雲量 ${Math.round(x.cloud)}%`;
 }
 // 依「要拍的那一面建築朝哪裡」列出太陽照在立面上的時段（順光＋側光）
 function directionsHtml(at) {
-  const rows = [0, 45, 90, 135, 180, 225, 270, 315].map(f => {
+  const rows = [0, 90, 180, 270].map(f => {
     const all = goodRanges((f + 180) % 360, at), segs = splitByWeather(all, at), sunny = segs.filter(x => x.sunny);
     // 短於 20 分鐘的空檔合併，避免被雲量小變化切得太碎
     const merged = [];
     for (const x of sunny) { const p = merged[merged.length - 1]; if (p && x.a - p.b <= 20) p.b = x.b; else merged.push({ ...x }); }
-    const cell = !all.length ? '<span class="sub">今天照不到</span>'
-      : merged.length ? merged.map(x => tjump(x.a, x.b)).join('') + (sunny.length < segs.length ? '<span class="sub">其餘多雲</span>' : '')
-      : `<span class="cloudy">${all.map(([a, b]) => tjump(a, b)).join('')}</span><span class="sub">預報多雲</span>`;
+    const best = merged.sort((x, y) => (y.b - y.a) - (x.b - x.a)).slice(0, 2).sort((x, y) => x.a - y.a);
+    const cell = !all.length ? '<span class="sub">照不到太陽</span>'
+      : best.length ? best.map(x => tjump(x.a, x.b)).join('') : '<span class="sub">預報多雲</span>';
     return `<div class="d">${dirName(f)}面</div><div>${cell}</div>`;
   }).join('');
-  return `<div class="sec-title">建築立面的受光時段</div>
-    <div class="sub" style="padding:0 24px 8px">要拍的建築正面朝哪個方向，就看那一列；時段內太陽照在立面上，不會逆光。只列預報晴朗的時段。</div>
-    <div class="dir-grid">${rows}</div>
-    <div class="sub" style="padding:4px 24px 16px">點時間可以直接跳到那個時刻。</div>`;
+  return `<div class="sec-title">建築正面何時順光</div>
+    <div class="sub" style="padding:0 24px 8px">建築正面朝哪邊就看哪一列：這段時間晴朗又順光。</div>
+    <div class="dir-grid" style="padding-bottom:16px">${rows}</div>`;
 }
 
 function updateInfo() {
