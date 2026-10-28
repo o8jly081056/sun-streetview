@@ -519,7 +519,7 @@
     <ol>
       <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立專案並綁定帳單（個人用量通常在每月免費額度內）</li>
       <li>啟用 <b>Maps JavaScript API</b>（必要）、<b>Places API (New)</b>（搜尋與匯入收藏）、<b>Geocoding API</b>（選用，地址反查）</li>
-      <li>建立 API 金鑰，建議在「應用程式限制」設定 HTTP 參照網址為 <code>http://localhost:8765/*</code></li>
+      <li>建立 API 金鑰，建議在「應用程式限制」設定 HTTP 參照網址為 <code id="refUrl">http://localhost:8765/*</code></li>
     </ol>
     <input id="keyInput" type="password" placeholder="AIza…">
     <label for="mapIdInput">Map ID（選用）：填了地圖文字會跟 Google 地圖一樣是向量字型</label>
@@ -3129,6 +3129,8 @@ function loadMaps(key) {
 }
 // 預設用你 Google Cloud 專案裡建立的向量 Map ID（Map ID 不是機密，可以寫在程式裡）；在設定裡填別的會優先使用
 const DEFAULT_MAP_ID = 'f403930763d97bed76380888';
+// 金鑰說明裡的允許網址：顯示目前開啟的網址（本機或 GitHub Pages）
+$('refUrl').textContent = location.origin + location.pathname.replace(/[^/]*$/, '') + '*';
 function getMapId() { try { return localStorage.getItem('gmapsMapId') || DEFAULT_MAP_ID; } catch { return DEFAULT_MAP_ID; } }
 function getKey() { try { return localStorage.getItem('gmapsKey') || ''; } catch { return ''; } }
 $('keySave').addEventListener('click', () => {
