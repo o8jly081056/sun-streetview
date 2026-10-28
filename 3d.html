@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 日照原型</title>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.121.0/Build/Cesium/Cesium.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.121.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body, #view { margin: 0; height: 100%; overflow: hidden; font: 14px -apple-system, "PingFang TC", sans-serif; }
+  #bar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); background: #fff; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3); padding: 10px 16px; display: flex; gap: 12px; align-items: center; width: min(640px, calc(100% - 24px)); }
+  #t { font-size: 22px; font-weight: 500; min-width: 64px; font-variant-numeric: tabular-nums; }
+  #slider { flex: 1; }
+  #info { position: absolute; top: 12px; left: 12px; background: rgba(32,33,36,.85); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="info">3D 日照原型 · 拖曳旋轉、滾輪縮放、右鍵拖曳傾斜</div>
+<div id="bar">
+  <div id="t">--:--</div>
+  <input id="date" type="date">
+  <input id="slider" type="range" min="300" max="1140" step="5" value="960">
+</div>
+<script>
+const key = localStorage.getItem('gmapsKey');
+const TZ = 8;
+const q = new URLSearchParams(location.search);
+const LAT = +(q.get('lat') || 25.0566), LNG = +(q.get('lng') || 121.5085);
+let date = new Date(Date.now() + TZ * 3600e3).toISOString().slice(0, 10);
+document.getElementById('date').value = date;
+
+Cesium.Ion.defaultAccessToken = '';
+const viewer = new Cesium.Viewer('view', {
+  globe: false, baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+  navigationHelpButton: false, timeline: false, animation: false, infoBox: false, selectionIndicator: false,
+  shadows: true, terrainShadows: Cesium.ShadowMode.DISABLED,
+});
+viewer.scene.skyAtmosphere.show = true;
+const sm = viewer.shadowMap;
+sm.softShadows = true; sm.size = 4096; sm.maximumDistance = 1500; sm.darkness = 0.35;
+
+// Google 的 3D 圖塊預設是「不受光」材質，這裡用自訂著色器改成受光，並用螢幕空間導數補法線
+const lit = new Cesium.CustomShader({
+  lightingModel: Cesium.LightingModel.PBR,
+  fragmentShaderText: `
+    void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+      vec3 p = fsInput.attributes.positionEC;
+      material.normalEC = normalize(cross(dFdx(p), dFdy(p)));
+      material.roughness = 1.0;
+    }`,
+});
+
+(async () => {
+  const tiles = await Cesium.Cesium3DTileset.fromUrl(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${key}`, {
+    showCreditsOnScreen: true, shadows: Cesium.ShadowMode.ENABLED, customShader: lit,
+  });
+  viewer.scene.primitives.add(tiles);
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(LNG + 0.0035, LAT - 0.0045, 260),
+    orientation: { heading: Cesium.Math.toRadians(-30), pitch: Cesium.Math.toRadians(-28), roll: 0 },
+  });
+})().catch(e => { document.getElementById('info').textContent = '載入失敗：' + e.message; });
+
+function setTime() {
+  const m = +document.getElementById('slider').value;
+  const [y, mo, d] = date.split('-').map(Number);
+  const ms = Date.UTC(y, mo - 1, d) + m * 60000 - TZ * 3600e3;
+  viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(ms));
+  viewer.clock.shouldAnimate = false;
+  document.getElementById('t').textContent = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+document.getElementById('slider').addEventListener('input', setTime);
+document.getElementById('date').addEventListener('change', e => { date = e.target.value; setTime(); });
+setTime();
+</script>
+</body>
+</html>

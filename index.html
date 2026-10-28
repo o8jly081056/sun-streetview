@@ -1,0 +1,3148 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>街景日照模擬</title>
+<style>
+  :root {
+    /* 對照 2025 版 Google 地圖網頁實測的顏色、陰影 */
+    --text: #1f1f1f;
+    --sub: #5e5e5e;
+    --icon: #5e5e5e;
+    --blue: #007b8b;          /* 主色（Google 地圖現行的藍綠色） */
+    --blue-bg: #d3f7ff;       /* 次要按鈕底色 */
+    --on-tonal: #014f5a;      /* 次要按鈕圖示與文字 */
+    --dark-accent: #7fd3e0;   /* 深色底上的主色 */
+    --surface: #f4fbfc;       /* 側欄背板 */
+    --line: #e3e3e3;
+    --hover: rgba(31,31,31,.08);
+    --shadow: 0 2px 4px rgba(0,0,0,.2), 0 -1px 0 rgba(0,0,0,.02);              /* 搜尋框 */
+    --elev1: rgba(60,64,67,.3) 0 1px 2px, rgba(60,64,67,.15) 0 1px 3px 1px;   /* 圖層、標籤 */
+    --elev2: rgba(60,64,67,.3) 0 1px 3px, rgba(60,64,67,.15) 0 4px 8px 3px;   /* 浮動卡片、選單 */
+    --shadow-lg: var(--elev2);
+    /* 跟 Google 地圖網頁完全相同的字型順序：英數字用 Google Sans，中文交給系統預設（Mac 為蘋方）。
+       原版也沒有實際載入 Google Sans Text，所以這裡同樣不載入 */
+    --font: "Google Sans Text", "Google Sans", Roboto, Arial, sans-serif;
+    --font-title: "Google Sans", Roboto, Arial, sans-serif;
+    /* 光線分類色 */
+    --front: #34a853; --sidelit: #fbbc04; --sideback: #fa7b17; --back: #ea4335; --top: #a142f4; --night: #3c4043;
+    /* 時段色 */
+    --day: #aecbfa; --golden: #f9ab00; --bluehr: #4a6fd8;
+    --railW: 72px; --sideW: 408px; --mapLeft: var(--railW);
+  }
+  body.side-open { --mapLeft: calc(var(--railW) + var(--sideW) + 8px); }
+  body.sv { --mapLeft: 340px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; color: var(--text); background: #e5e3df;
+    font: 14px/20px var(--font); letter-spacing: .1px; }
+  svg { fill: currentColor; flex: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+  input, select { font: inherit; color: var(--text); }
+  .sub { color: var(--sub); font-size: 12px; line-height: 16px; letter-spacing: .2px; }
+
+  /* ---- 地圖 ---- */
+  #map { position: absolute; top: 0; right: 0; bottom: 0; left: var(--railW); z-index: 1; }
+
+  /* ---- 左側工具列 ---- */
+  /* 側欄背板：面板打開時連同左側工具列一起變成淺色底，右側大圓角 */
+  #shell { position: absolute; left: 0; top: 0; bottom: 0; width: var(--railW); background: #fff; z-index: 9; transition: width .2s; }
+  body.side-open #shell { width: calc(var(--railW) + var(--sideW) + 8px); background: var(--surface); border-radius: 0 32px 32px 0; }
+  #rail { position: absolute; left: 0; top: 0; bottom: 0; width: var(--railW); background: transparent; z-index: 12;
+    display: flex; flex-direction: column; align-items: center; padding-top: 16px; gap: 12px; }
+  .rail-btn { width: 72px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--icon); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .2px; }
+  .rail-btn .pill { width: 48px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; }
+  .rail-btn:hover .pill { background: var(--hover); }
+  .rail-btn.on { color: var(--on-tonal); }
+  .rail-btn.on .pill { background: var(--blue-bg); }
+  #menuBtn { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--icon); margin-bottom: 8px; }
+  #menuBtn:hover { background: var(--hover); }
+
+  /* ---- 側面板 ---- */
+  #side { position: absolute; left: var(--railW); top: 8px; bottom: 8px; width: var(--sideW); background: #fff; z-index: 10;
+    border-radius: 24px; overflow-y: auto; padding-top: 72px; display: none; }
+  body.side-open #side { display: block; }
+  /* 跟 Google 地圖一樣：往下捲時，搜尋框後面墊一條白色頂欄，內容從底下捲過去，不會被搜尋框壓住 */
+  #sideHead { position: absolute; left: var(--railW); top: 8px; width: var(--sideW); height: 72px; background: #fff; border-radius: 24px 24px 0 0;
+    z-index: 11; display: none; pointer-events: none; transition: box-shadow .15s; }
+  body.side-open.head-on #sideHead { display: block; }
+  body.side-open.head-line #sideHead { box-shadow: 0 1px 0 var(--line); }
+  #sideToggle { position: absolute; top: 50%; left: var(--mapLeft); transform: translateY(-50%); z-index: 9; width: 23px; height: 48px;
+    background: #fff; border-radius: 0 8px 8px 0; box-shadow: var(--elev1); display: none; align-items: center; justify-content: center; color: var(--icon); }
+  body.side-open #sideToggle { background: var(--surface); box-shadow: none; }
+  body.has-view #sideToggle { display: flex; }
+  body:not(.side-open) #sideToggle svg { transform: rotate(180deg); }
+  .view { display: none; }
+  .view.on { display: block; }
+  .pad { padding: 0 24px; }
+  .hero { margin: -72px 0 0; height: 240px; background: #e8eaed center/cover no-repeat; position: relative; }
+  .hero .cred { position: absolute; right: 8px; bottom: 6px; font-size: 12px; letter-spacing: .2px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.8); max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hero .cred a { color: inherit; }
+  .rating { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--sub); margin-top: 4px; }
+  .rating .stars { color: #fbbc04; display: inline-flex; }
+  .rating .stars svg { fill: currentColor; }
+  .rating .stars .off { color: #dadce0; }
+  .ptype { color: var(--sub); font-size: 14px; }
+  .open-now { color: #2b7f3f; } .closed-now { color: #d32f28; }
+  details.hours summary { cursor: pointer; list-style: none; }
+  details.hours summary::-webkit-details-marker { display: none; }
+  details.hours ol { list-style: none; padding: 8px 0 0; margin: 0; font-size: 14px; line-height: 20px; }
+  details.hours li { padding: 2px 0; }
+  .info-row a { color: inherit; text-decoration: none; word-break: break-all; }
+  .info-row a:hover { text-decoration: underline; }
+  .loading-line { height: 12px; border-radius: 6px; background: #eef2f3; margin: 10px 0; }
+  .ptitle { font: 400 22px/28px var(--font-title); margin: 16px 0 0; color: var(--text); letter-spacing: 0; }
+  .divider { height: 1px; background: var(--line); margin: 8px 0; }
+  .actions { display: flex; justify-content: center; padding: 16px 12px 8px; }
+  .act { display: flex; flex-direction: column; align-items: center; width: 72px; color: var(--on-tonal); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .2px; text-align: center; }
+  .act .circle { width: 40px; height: 40px; margin: 4px 4px 4px; border-radius: 50%; background: var(--blue-bg); display: flex; align-items: center; justify-content: center; }
+  .act .circle svg { width: 18px; height: 18px; }
+  .act:hover .circle { filter: brightness(.95); }
+  .act.primary .circle { background: var(--blue); color: #fff; }
+  .info-row { display: flex; gap: 24px; padding: 8px 24px; min-height: 40px; align-items: flex-start; font-size: 14px; line-height: 20px; }
+  .info-row > svg { color: var(--blue); margin-top: -2px; }
+  .info-row .k { color: var(--sub); font-size: 12px; line-height: 16px; letter-spacing: .2px; }
+  .sec-title { font: 500 16px/24px var(--font-title); padding: 8px 24px 4px; letter-spacing: 0; }
+  .dir-grid { display: grid; grid-template-columns: 72px 1fr; gap: 4px 12px; padding: 0 24px 8px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .dir-grid .d { color: var(--sub); }
+  .dir-grid > div:nth-child(even) { display: flex; flex-wrap: wrap; gap: 0 12px; }
+  .light-grid { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px 12px; padding: 4px 24px 12px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .light-grid .h { color: var(--sub); font-size: 12px; line-height: 16px; letter-spacing: .2px; }
+  .light-grid .d { color: var(--sub); display: flex; align-items: center; gap: 6px; }
+  .light-grid .d i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .tjump { color: var(--blue); font-variant-numeric: tabular-nums; border-radius: 4px; padding: 0 2px; margin: 0 -2px; }
+  .tjump:hover { background: rgba(0,123,139,.08); text-decoration: underline; }
+  .trip-days { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 24px 8px; }
+  .chip { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #c4c7c5; font-size: 14px; font-weight: 500; color: var(--text); background: #fff; }
+  .chip:hover { background: var(--hover); }
+  .chip.on { background: var(--blue-bg); border-color: var(--blue-bg); color: var(--on-tonal); }
+  .trip-row { display: flex; gap: 16px; padding: 8px 24px; align-items: flex-start; cursor: pointer; }
+  .trip-row:hover { background: var(--hover); }
+  .trip-row .tm { width: 52px; flex: none; font: 500 15px/20px var(--font-title); color: var(--blue); font-variant-numeric: tabular-nums; }
+  .trip-row .tm .sub { font-weight: 400; }
+  .cloudy .tjump { color: var(--sub); text-decoration: line-through; text-decoration-color: rgba(94,94,94,.4); }
+  .row-btn { display: flex; align-items: center; gap: 20px; width: 100%; padding: 12px 24px; text-align: left; }
+  .row-btn:hover { background: var(--hover); }
+  .row-btn > svg { color: var(--icon); }
+  .row-btn .t { flex: 1; min-width: 0; }
+  .row-btn .t div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; flex: none; }
+  .icon-btn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: var(--icon); flex: none; }
+  .icon-btn:hover { background: var(--hover); }
+  .row-btn .icon-btn.del { visibility: hidden; }
+  .row-btn:hover .icon-btn.del { visibility: visible; }
+  .view-head { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 12px; min-height: 48px; }
+  .view-head h2 { flex: 1; font: 400 22px/28px var(--font-title); margin: 0; color: var(--text); letter-spacing: 0; }
+  .pill-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 24px; border-radius: 20px; border: 1px solid #747775; color: var(--blue); font-weight: 500; background: #fff; }
+  .pill-btn:hover { background: rgba(0,123,139,.08); }
+  .pill-btn.filled { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .pill-btn.filled:hover { filter: brightness(1.08); }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; cursor: pointer; }
+  /* Material 3 開關（跟 Google 地圖選單的「顯示側欄」一樣） */
+  .switch input { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; border-radius: 10px;
+    background: #e3e3e3; border: 2px solid #747775; cursor: pointer; transition: background .15s, border-color .15s; }
+  .switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #747775; transition: all .15s; }
+  .switch input:checked { background: var(--blue); border-color: var(--blue); }
+  .switch input:checked::after { left: 18px; top: 1px; width: 14px; height: 14px; background: #fff; }
+
+  /* ---- 搜尋框 ---- */
+  #searchBox { position: absolute; top: 16px; left: calc(var(--railW) + 16px); width: calc(var(--sideW) - 32px); z-index: 13;
+    background: #fff; border-radius: 24px; box-shadow: var(--shadow); }
+  #searchBox.open { border-radius: 24px; box-shadow: var(--elev2); overflow: hidden; }
+  .search-row { display: flex; align-items: center; height: 48px; padding: 0 4px 0 16px; }
+  #search::-webkit-search-cancel-button { display: none; }
+  #search { -webkit-appearance: none; appearance: none; flex: 1; border: 0; outline: none; background: transparent; font-size: 15px; line-height: 24px; padding: 0 8px 0 8px; min-width: 0; color: var(--text); }
+  #search::placeholder { color: var(--sub); }
+  /* 瀏覽器自動填入會替輸入框加淺藍底，蓋回白底 */
+  #search:-webkit-autofill, #search:-webkit-autofill:hover, #search:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 40px #fff inset; -webkit-text-fill-color: var(--text); caret-color: var(--text); transition: background-color 9999s; }
+  #search:autofill { background: transparent; }
+  #mMenu { display: none; }
+  #suggest { list-style: none; margin: 0; padding: 0 0 8px; border-top: 1px solid var(--line); display: none; max-height: 60vh; overflow-y: auto; }
+  #searchBox.open #suggest { display: block; }
+  #suggest li { display: flex; gap: 16px; align-items: center; padding: 8px 24px; cursor: pointer; }
+  #suggest li svg { color: var(--icon); }
+  #suggest li:hover, #suggest li.active { background: var(--hover); }
+  #suggest li .t { min-width: 0; }
+  #suggest li .t div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---- 選單 ---- */
+  /* 跟 Google 地圖一樣：從左側滑出的整排抽屜，後面壓暗 */
+  #menu { position: fixed; top: 0; left: 0; bottom: 0; width: 320px; background: #fff; box-shadow: var(--elev2);
+    z-index: 21; padding: 0 0 12px; overflow-y: auto; transform: translateX(-104%); transition: transform .2s ease; visibility: hidden; }
+  #menu.show { transform: none; visibility: visible; }
+  #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 20; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  #menu.show ~ #scrim { opacity: 1; pointer-events: auto; }
+  .menu-head { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 8px 0 22px; }
+  .menu-head b { font: 500 18px/24px var(--font-title); color: var(--text); }
+  #menu .row-btn { padding: 8px 22px; gap: 24px; font-size: 14px; color: var(--text); }
+  #menu .row-btn > svg { color: var(--icon); }
+  #menu .divider { margin: 8px 0; }
+  #menu .switch { padding: 8px 22px; font-size: 14px; }
+
+  /* ---- 圖層 ---- */
+  #layerTile { position: absolute; left: calc(var(--mapLeft) + 24px); bottom: 21px; z-index: 9; display: flex; gap: 8px; align-items: flex-end; }
+  #layerMain { width: 79px; height: 79px; border-radius: 8px; border: 2px solid #fff; box-shadow: var(--elev1); position: relative; overflow: hidden; }
+  #layerMain .thumb { position: absolute; inset: 0; }
+  #layerMain .lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 0 4px; color: #fff; font-size: 12px; font-weight: 500;
+    display: flex; align-items: center; justify-content: center; gap: 2px; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  #layerMore { display: none; background: #fff; border-radius: 8px; box-shadow: var(--elev2); padding: 8px; gap: 8px; }
+  #layerTile:hover #layerMore { display: flex; }
+  .lyr { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--sub); }
+  .lyr .thumb { width: 48px; height: 48px; border-radius: 8px; border: 2px solid transparent; }
+  .lyr.on { color: var(--blue); }
+  .lyr.on .thumb { border-color: var(--blue); }
+  .th-road { background: linear-gradient(35deg, transparent 46%, #fff 47% 52%, transparent 53%), linear-gradient(120deg, transparent 60%, #fde293 61% 66%, transparent 67%), #e8eaed; }
+  .th-sat { background: radial-gradient(circle at 30% 30%, #6b8f5a, transparent 40%), radial-gradient(circle at 70% 70%, #3d5e74, transparent 45%), linear-gradient(135deg, #4b6a3c, #7a7f5c 50%, #44606e); }
+  .th-ter { background: radial-gradient(circle at 40% 40%, #cfe3c4, transparent 35%), radial-gradient(circle at 65% 65%, #b9d3a9, transparent 40%), #e3eed9; }
+  body.sv #layerTile { display: none; }
+  .gm-btn { width: 40px; height: 40px; background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,.3) 0 1px 4px; display: flex; align-items: center; justify-content: center; color: var(--icon); margin: 0 10px 10px 0; }
+  .gm-btn:hover { color: var(--text); }
+  /* 地圖 API 內建的縮放鈕、街景小人改成現行 Google 地圖的 8px 圓角 */
+  #map .gm-bundled-control .gmnoprint > div, #map .gm-svpc { border-radius: 8px !important; box-shadow: rgba(0,0,0,.3) 0 1px 4px !important; overflow: hidden; }
+
+  /* ---- 時間列 ---- */
+  /* 位置：盡量置中；但一定要避開左下角圖層縮圖＋展開的圖層選單（約 304px），空間不夠就往右挪、寬度變短。
+     --tbW 是寬度：最寬 680px，右邊留 64px 給縮放鈕 */
+  #timebar { position: absolute; bottom: 24px; z-index: 8; transform: none; min-width: 300px;
+    --tbW: min(680px, calc(100vw - var(--mapLeft) - 304px - 64px)); width: var(--tbW);
+    left: max(calc(var(--mapLeft) + 304px), calc(50vw - var(--tbW) / 2));
+    background: #fff; border-radius: 16px; box-shadow: var(--elev2); padding: 12px 16px 10px; }
+  body.side-open #timebar { left: max(calc(var(--mapLeft) + 304px), calc(var(--mapLeft) + (100vw - var(--mapLeft) - var(--tbW)) / 2)); }
+  /* 街景模式沒有圖層縮圖，直接置中，只避開左下角小地圖 */
+  /* 時間軸只在街景模式出現；地圖模式用不到 */
+  body:not(.sv) #timebar { display: none !important; }
+  body.dark #timebar { background: rgba(31,31,31,.92); color: #fff; --tbW: min(680px, calc(100vw - 2 * var(--mapLeft) - 16px)); left: calc(50vw - var(--tbW) / 2); }
+  .tb-row { flex-wrap: wrap; row-gap: 6px; }
+  .tb-slider { flex: 1 1 220px; }
+  body.dark #timebar .sub, body.dark .ticks { color: #bdc1c6; }
+  .tb-row { display: flex; align-items: center; gap: 12px; }
+  #play { width: 40px; height: 40px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+  .tb-time { display: flex; flex-direction: column; flex: none; }
+  #timeLabel { font-family: var(--font-title); font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.1; cursor: text; border-radius: 4px; margin: 0 -3px; padding: 0 3px; }
+  #timeLabel:hover { background: rgba(127,127,127,.15); }
+  #timeInput { width: 72px; font-family: inherit; font-size: 22px; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; border: 0; border-bottom: 2px solid var(--blue); padding: 0 2px; margin: 0 -3px; background: transparent; color: inherit; outline: none; }
+  #timeInput.bad { border-bottom-color: #d93025; }
+  .slider-wrap { cursor: pointer; touch-action: none; }
+  #slider { pointer-events: none; }
+  #scrubTip { position: absolute; bottom: 30px; transform: translateX(-50%); background: #303030; color: #fff; font-size: 12px; font-weight: 500; padding: 4px 8px; border-radius: 8px;
+    white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s; font-variant-numeric: tabular-nums; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  #scrubTip.show { opacity: 1; }
+  #scrubTip .f { color: var(--dark-accent); margin-left: 6px; }
+  body.dark #scrubTip { background: #fff; color: var(--text); }
+  body.dark #scrubTip .f { color: var(--blue); }
+  #date { border: 0; padding: 0; background: transparent; font-family: var(--font); font-size: 12px; letter-spacing: .2px; color: var(--sub); }
+  body.dark #date { color: #bdc1c6; color-scheme: dark; }
+  .tb-slider { flex: 1; min-width: 0; }
+  .slider-wrap { position: relative; height: 24px; }
+  #bands { position: absolute; left: 0; right: 0; top: 7px; height: 10px; width: 100%; border-radius: 5px; }
+  #slider { position: absolute; inset: 0; width: 100%; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; }
+  #slider::-webkit-slider-runnable-track { height: 24px; background: transparent; }
+  #slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: 3px; border-radius: 50%; background: #fff; border: 2px solid var(--blue); box-shadow: 0 1px 3px rgba(0,0,0,.4); cursor: ew-resize; }
+  #slider::-moz-range-track { background: transparent; }
+  #slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--blue); }
+  .ticks { display: flex; justify-content: space-between; color: var(--sub); font-size: 11px; line-height: 16px; letter-spacing: .5px; padding: 0 2px; }
+  .tb-btns { display: flex; gap: 2px; flex: none; }
+  .tb-btns button { height: 32px; padding: 0 12px; border-radius: 16px; font-size: 14px; color: var(--blue); font-weight: 500; }
+  .tb-btns button:hover { background: rgba(0,123,139,.08); }
+  #now.on { background: var(--blue); color: #fff !important; }
+  body.dark .tb-btns button { color: var(--dark-accent); }
+  body.dark .tb-btns button:hover { background: rgba(127,211,224,.15); }
+  .tb-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; line-height: 16px; letter-spacing: .2px; color: var(--sub); }
+  body.dark .legend { color: #bdc1c6; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
+  #sunLine { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  body.dark #sunLine { color: #bdc1c6; }
+
+  /* ---- 街景模式 ---- */
+  /* 街景容器一直保持實際尺寸（只是藏在地圖下方），避免切換時渲染器延遲啟動而黑畫面 */
+  #pano-wrap { position: absolute; inset: 0; z-index: 0; background: #000; overflow: hidden; visibility: hidden; }
+  body.sv #pano-wrap { z-index: 4; visibility: visible; }
+  body.sv #map { left: 24px; top: auto; right: auto; bottom: 24px; width: 292px; height: 190px; z-index: 6;
+    border-radius: 8px; overflow: hidden; box-shadow: var(--elev2); border: 2px solid #fff; }
+  body.sv #rail, body.sv #sideHead, body.sv #shell, body.sv #side, body.sv #sideToggle, body.sv #searchBox { display: none !important; }
+  #pano { position: absolute; inset: 0; z-index: 0; }
+  /* 光線模擬：#pano 套整體調色，#shade 用相乘做暗部與色溫，#glow 用濾色做逆光眩光 */
+  #pano { transition: filter .25s; }
+  #shade, #glow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  #shade { mix-blend-mode: multiply; }
+  #glow { mix-blend-mode: screen; }
+  #rain { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  #wxInfo { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #c4c7c5; margin-top: 2px; }
+  #wxInfo:empty, #svDate:empty { display: none; }
+  #svDate { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #9aa0a6; margin-top: 2px; }
+  .week-card { display: none; flex-direction: column; gap: 0; padding: 12px 0 8px; max-height: calc(100vh - 560px); min-height: 180px; overflow-y: auto; }
+  .week-card.show { display: flex; }
+  .week-card .wk-head { padding: 0 16px 6px; font: 500 14px/20px var(--font-title); }
+  .week-card .wk-head .sub { color: #bdc1c6; font-weight: 400; }
+  .wk-row { display: grid; grid-template-columns: 78px 1fr; gap: 2px 10px; padding: 8px 16px; text-align: left; width: 100%; color: #e8eaed; font-size: 13px; line-height: 18px; }
+  .wk-row:hover, .wk-row.on { background: rgba(255,255,255,.08); }
+  .wk-row .d { color: #fff; font-weight: 500; }
+  .wk-row .best { color: var(--dark-accent); }
+  .wk-row .meta { grid-column: 2; color: #bdc1c6; font-size: 12px; }
+  .wk-row .none { color: #9aa0a6; }
+  .wk-bar { grid-column: 2; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); position: relative; overflow: hidden; }
+  .wk-bar i { position: absolute; top: 0; bottom: 0; background: var(--front); border-radius: 2px; }
+  .wx-menu { display: none; position: absolute; z-index: 6; background: #2b2b2b; color: #fff; border-radius: 12px; padding: 6px 0; min-width: 260px; box-shadow: var(--elev2); }
+  .wx-menu.show { display: block; }
+  .wx-menu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 16px; font-size: 14px; text-align: left; }
+  .wx-menu button:hover { background: rgba(255,255,255,.08); }
+  .wx-menu button.on { color: var(--dark-accent); }
+  .wx-menu .sep { height: 1px; background: rgba(255,255,255,.12); margin: 6px 0; }
+  #lightInfo { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #c4c7c5 !important; color: #fff; margin-top: 4px; }
+  #lightInfo .ph { font-weight: 500; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+  #compass { position: absolute; right: 16px; top: 16px; width: 112px; height: 112px; pointer-events: none; z-index: 3; }
+  #svTop { position: absolute; top: 16px; left: 16px; width: 340px; z-index: 5; display: flex; flex-direction: column; gap: 8px; }
+  .sv-card { background: rgba(31,31,31,.88); color: #fff; border-radius: 16px; padding: 8px 14px 10px 6px; display: flex; gap: 6px; align-items: flex-start; }
+  .sv-card .icon-btn { color: #fff; }
+  .sv-card .icon-btn:hover { background: rgba(255,255,255,.12); }
+  #svTitle { font: 500 16px/24px var(--font-title); margin-top: 8px; }
+  #badge { font-size: 14px; line-height: 20px; font-weight: 500; color: #fff; margin-top: 4px; }
+  #adviceText { font-size: 14px; color: #e8eaed; margin-top: 8px; line-height: 20px; }
+  #svTop .tjump { color: var(--dark-accent); }
+  #svTop .tjump:hover { background: rgba(127,211,224,.15); }
+  #adviceText .sub { color: #bdc1c6; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .sv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sv-chips button { height: 32px; padding: 0 16px 0 12px; border-radius: 16px; background: rgba(31,31,31,.88); color: #fff; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; line-height: 20px; }
+  .sv-chips button:hover { background: rgba(68,71,70,.95); }
+  #shadeInfo { font-size: 13px; margin-top: 4px; color: #fde293; }
+  #shadeInfo.shaded { color: #c4c7c5; }
+  #shadeInfo.lamp { color: #fde293; font-size: 12px; line-height: 16px; letter-spacing: .2px; }
+  body.no3d #sv3d, body.no3d #pc3d, body.no3d #shadeInfo:empty { display: none; }
+  #sunlit { position: absolute; left: 0; right: 0; top: 19px; height: 4px; width: 100%; border-radius: 2px; pointer-events: none; }
+
+  /* ---- 3D 視角（Cesium + Google 3D 圖塊）：平常藏在底下，背景用來算建築遮蔽 ---- */
+  #cesium-wrap { position: absolute; inset: 0; z-index: 0; visibility: hidden; background: #000; }
+  #cesium { position: absolute; inset: 0; }
+  body.c3d #cesium-wrap { visibility: visible; z-index: 5; }
+  body.c3d:not(.sv) { --mapLeft: 0px; }
+  body.c3d #rail, body.c3d #shell, body.c3d #side, body.c3d #sideToggle, body.c3d #searchBox, body.c3d #layerTile,
+  body.c3d #svTop, body.c3d #compass { display: none !important; }
+  #c3dTop { position: absolute; top: 16px; left: 16px; width: 340px; z-index: 2; display: none; flex-direction: column; gap: 8px; }
+  body.c3d #c3dTop { display: flex; }
+  #c3dTop .sv-chips button.on, #svMarks.on, #svWx.on, #svWeek.on { background: var(--dark-accent); color: #00363d; }
+  .cesium-viewer-bottom { left: auto !important; right: 8px; bottom: 4px !important; }
+
+  /* ---- 對話框 ---- */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.32); display: none; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+  .modal.show { display: flex; }
+  .modal .card { background: #fff; border-radius: 24px; padding: 24px; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
+  .modal h2 { font: 400 22px/28px var(--font-title); margin: 0 0 12px; }
+  .modal ol { padding-left: 20px; color: var(--sub); }
+  .modal a { color: var(--blue); }
+  .modal label { display: block; color: var(--sub); font-size: 12px; margin: 14px 0 4px; }
+  .modal input:not([type=file]), .modal select { width: 100%; height: 48px; border: 1px solid #747775; border-radius: 8px; padding: 0 14px; outline-color: var(--blue); background: #fff; }
+  .modal .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+  #drop { border: 2px dashed #c4c7c5; border-radius: 16px; padding: 24px; text-align: center; color: var(--sub); margin-top: 12px; cursor: pointer; }
+  #drop.over { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+  #keyErr { color: #b3261e; margin-top: 8px; display: none; }
+  #toast { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); background: #303030; color: #f2f2f2; padding: 14px 16px;
+    border-radius: 8px; box-shadow: var(--elev2); opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 40; font-size: 14px; }
+  #toast.show { opacity: 1; }
+  .saved-pin { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center;
+    color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .sun-pin { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle, #fff6d8 0 35%, #f9ab00 36% 60%, #f9ab0000 61%); }
+
+  /* ---- 手機 ---- */
+  @media (max-width: 1100px) and (min-width: 761px) {
+    body.dark #timebar { left: 332px; right: 72px; width: auto; min-width: 0; }
+  }
+  @media (max-width: 1100px) {
+    body.side-open #layerTile { display: none; }
+    body.side-open:not(.dark) #timebar { left: calc(var(--mapLeft) + 12px); right: 12px; width: auto; transform: none; min-width: 0; }
+  }
+  @media (max-width: 760px) {
+    :root { --railW: 0px; --sideW: 100vw; }
+    body.side-open { --mapLeft: 0px; }
+    body.sv { --mapLeft: 0px; }
+    #rail { display: none; }
+    #mMenu { display: flex; }
+    #searchBox { left: 8px; right: 8px; width: auto; top: 8px; }
+    #side { top: auto; left: 0; height: 52vh; border-radius: 24px 24px 0 0; padding-top: 12px; bottom: 0; box-shadow: var(--elev2); }
+    #shell, #sideHead { display: none !important; }
+    .hero { margin-top: -12px; height: 180px; border-radius: 24px 24px 0 0; }
+    #sideToggle { display: none !important; }
+    #timebar, body.dark #timebar, body.side-open #timebar { left: 8px; right: 8px; width: auto; transform: none; min-width: 0; bottom: 8px; padding: 8px 10px; }
+    body.side-open #timebar { display: none; }
+    #layerTile { bottom: 150px; left: 8px; }
+    body.sv #map { width: 140px; height: 100px; left: 8px; bottom: 150px; }
+    #svTop { width: calc(100vw - 140px); left: 8px; top: 8px; }
+    #compass { width: 84px; height: 84px; right: 8px; top: 8px; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="pano-wrap">
+  <div id="pano"></div>
+  <canvas id="shade"></canvas>
+  <canvas id="glow"></canvas>
+  <canvas id="rain"></canvas>
+  <canvas id="overlay"></canvas>
+  <canvas id="compass"></canvas>
+  <div id="svTop">
+    <div class="sv-card">
+      <button id="svBack" class="icon-btn" title="返回地圖" data-icon="arrow_back"></button>
+      <div style="min-width:0">
+        <div id="svTitle">街景</div>
+        <div id="badge"><span class="dot"></span><span id="badgeText"></span></div>
+        <div id="lightInfo"></div>
+        <div id="shadeInfo"></div>
+        <div id="wxInfo"></div>
+        <div id="svDate"></div>
+        <div id="adviceText"></div>
+      </div>
+    </div>
+    <div id="wxMenu" class="wx-menu"></div>
+    <div class="sv-chips">
+      <button id="faceSun" data-icon="sun" data-size="18">轉向太陽</button>
+      <button id="backSun" data-icon="sun_back" data-size="18">背對太陽</button>
+      <button id="svSave" data-icon="bookmark_border" data-size="18">儲存此機位</button>
+      <button id="svMarks" data-icon="visibility" data-size="18">太陽標示</button>
+      <button id="svWx" data-icon="cloud" data-size="18"><span id="svWxLbl">天氣：預報</span></button>
+      <button id="svWeek" data-icon="clock" data-size="18">未來 7 天</button>
+      <button id="sv3d" data-icon="cube" data-size="18">3D 視角</button>
+    </div>
+    <div id="weekCard" class="sv-card week-card"></div>
+  </div>
+</div>
+
+<div id="cesium-wrap">
+  <div id="cesium"></div>
+  <div id="c3dTop">
+    <div class="sv-card">
+      <button id="c3dBack" class="icon-btn" title="返回" data-icon="arrow_back"></button>
+      <div style="min-width:0">
+        <div id="svTitle3d" style="font-size:16px;font-weight:500;margin-top:8px">3D 視角</div>
+        <div id="c3dInfo" style="font-size:13px;color:#e8eaed;margin-top:2px"></div>
+        <div class="sub" style="color:#bdc1c6;margin-top:4px">拖曳旋轉 · 滾輪縮放 · 右鍵或 Ctrl＋拖曳改變傾斜。紅點是你的位置。</div>
+      </div>
+    </div>
+    <div class="sv-chips">
+      <button id="c3dBird" class="on">鳥瞰</button>
+      <button id="c3dEye">人眼視角</button>
+    </div>
+  </div>
+</div>
+
+<div id="shell"></div>
+<nav id="rail">
+  <button id="menuBtn" title="選單" data-icon="menu"></button>
+  <button class="rail-btn" data-view="saved"><span class="pill" data-icon="bookmark_border"></span>已儲存</button>
+  <button class="rail-btn" data-view="sun"><span class="pill" data-icon="sun"></span>日照</button>
+</nav>
+
+<div id="side">
+  <div class="view" id="view-place"></div>
+  <div class="view" id="view-sun"></div>
+  <div class="view" id="view-saved"></div>
+  <div class="view" id="view-list"></div>
+</div>
+<div id="sideHead"></div>
+<button id="sideToggle" title="收合側邊面板" data-icon="chevron_left"></button>
+
+<div id="searchBox">
+  <div class="search-row">
+    <button id="mMenu" class="icon-btn" title="選單" data-icon="menu"></button>
+    <input id="search" type="search" name="q-sunsv" placeholder="搜尋 Google 地圖" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore>
+    <button id="searchBtn" class="icon-btn" title="搜尋" data-icon="search"></button>
+    <button id="clearSearch" class="icon-btn" title="清除" data-icon="close" style="display:none"></button>
+  </div>
+  <ul id="suggest"></ul>
+</div>
+
+<div id="menu">
+  <div class="menu-head"><b>街景日照模擬</b><button class="icon-btn" id="menuClose" title="關閉選單" data-icon="close"></button></div>
+  <button class="row-btn" data-menu="saved" data-icon="bookmark_border"><span class="t">已儲存</span></button>
+  <button class="row-btn" data-menu="sun" data-icon="sun"><span class="t">日照資訊</span></button>
+  <div class="divider"></div>
+  <button class="row-btn" data-menu="import" data-icon="upload"><span class="t">匯入 Google 收藏</span></button>
+  <button class="row-btn" data-menu="export" data-icon="download"><span class="t">匯出收藏備份</span></button>
+  <button class="row-btn" data-menu="key" data-icon="key"><span class="t">更換 API 金鑰</span></button>
+  <div class="divider"></div>
+  <label class="switch"><span>地圖顯示太陽方向線</span><input type="checkbox" data-opt="mapSun"></label>
+  <label class="switch"><span>街景顯示太陽標示（軌跡、位置）</span><input type="checkbox" data-opt="path"></label>
+  <label class="switch"><span>街景顯示地平線</span><input type="checkbox" data-opt="horizon"></label>
+  <label class="switch"><span>街景光線模擬（亮度、色溫、逆光）</span><input type="checkbox" data-opt="tint"></label>
+</div>
+<div id="scrim"></div>
+
+<div id="layerTile">
+  <button id="layerMain" title="切換圖層"><span class="thumb"></span><span class="lbl" data-icon="layers" data-size="14"><span id="layerLbl">衛星</span></span></button>
+  <div id="layerMore">
+    <button class="lyr" data-type="roadmap"><span class="thumb th-road"></span>預設</button>
+    <button class="lyr" data-type="hybrid"><span class="thumb th-sat"></span>衛星</button>
+    <button class="lyr" data-type="terrain"><span class="thumb th-ter"></span>地形</button>
+  </div>
+</div>
+
+<div id="timebar">
+  <div class="tb-row">
+    <button id="play" title="播放一天的變化" data-icon="play"></button>
+    <div class="tb-time">
+      <div id="timeLabel" title="點一下直接輸入時間" role="button" tabindex="0">--:--</div>
+      <input id="timeInput" type="text" inputmode="numeric" autocomplete="off" aria-label="輸入時間" hidden>
+      <input id="date" type="date">
+    </div>
+    <div class="tb-slider">
+      <div class="slider-wrap">
+        <canvas id="bands"></canvas>
+        <canvas id="sunlit"></canvas>
+        <input id="slider" type="range" min="0" max="1439" step="1" value="720" aria-label="時間">
+        <div id="scrubTip"></div>
+      </div>
+      <div class="ticks"><span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div>
+    </div>
+    <div class="tb-btns">
+      <button id="now">現在</button>
+    </div>
+  </div>
+  <div class="tb-foot">
+    <div class="legend" id="legend"></div>
+    <div id="sunLine"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div class="modal" id="keyModal">
+  <div class="card">
+    <h2>輸入 Google Maps API 金鑰</h2>
+    <p class="sub">金鑰只存在你這台電腦的瀏覽器（localStorage），不會上傳到其他地方。</p>
+    <ol>
+      <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立專案並綁定帳單（個人用量通常在每月免費額度內）</li>
+      <li>啟用 <b>Maps JavaScript API</b>（必要）、<b>Places API (New)</b>（搜尋與匯入收藏）、<b>Geocoding API</b>（選用，地址反查）</li>
+      <li>建立 API 金鑰，建議在「應用程式限制」設定 HTTP 參照網址為 <code>http://localhost:8765/*</code></li>
+    </ol>
+    <input id="keyInput" type="password" placeholder="AIza…">
+    <label for="mapIdInput">Map ID（選用）：填了地圖文字會跟 Google 地圖一樣是向量字型</label>
+    <input id="mapIdInput" type="text" placeholder="例如 8e0a97af9386fef" autocomplete="off" spellcheck="false">
+    <label for="cwaKeyInput">中央氣象署 API 授權碼（選用）：填了天氣就用氣象署的鄉鎮預報。到 <a href="https://opendata.cwa.gov.tw/user/authkey" target="_blank" rel="noopener">氣象資料開放平臺</a> 註冊會員後取得</label>
+    <input id="cwaKeyInput" type="password" placeholder="CWA-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" autocomplete="off" spellcheck="false">
+    <div id="keyErr"></div>
+    <div class="btns"><button id="keySave" class="pill-btn filled">開始使用</button></div>
+  </div>
+</div>
+
+<div class="modal" id="saveModal">
+  <div class="card">
+    <h2>儲存到清單</h2>
+    <label>名稱</label><input id="saveName">
+    <label>清單</label>
+    <select id="saveList"></select>
+    <label>備註（例：最佳拍攝時間、注意事項）</label><input id="saveNote">
+    <div class="sub" id="saveHint" style="margin-top:8px"></div>
+    <div class="btns">
+      <button class="pill-btn" data-close>取消</button>
+      <button id="saveOk" class="pill-btn filled">儲存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="importModal">
+  <div class="card">
+    <h2>匯入 Google 地圖收藏</h2>
+    <p class="sub">Google 沒有開放 API 讀取個人收藏，需要先用 Google Takeout 匯出一次再匯入：</p>
+    <ol>
+      <li>打開 <a href="https://takeout.google.com/" target="_blank" rel="noopener">Google Takeout</a>，先按「取消全選」</li>
+      <li>勾選 <b>「已儲存」</b>（收藏清單，每個清單一個 CSV）與 <b>「地圖 (你的地點)」</b>（加星號地點 JSON）</li>
+      <li>匯出並下載 zip，解壓縮後把裡面的 <code>.csv</code> / <code>.json</code> 拖進下方</li>
+    </ol>
+    <p class="sub">也支援「我的地圖」匯出的 <code>.kml</code>、一般 <code>.geojson</code>，以及本工具的備份檔。CSV 若沒有座標，會用地點名稱透過 Places API 自動查找。</p>
+    <div id="drop">把檔案拖到這裡，或點此選擇檔案（可多選）</div>
+    <input id="importFile" type="file" multiple accept=".csv,.json,.geojson,.kml" hidden>
+    <div id="importLog" class="sub" style="margin-top:10px; white-space:pre-line"></div>
+    <div class="btns"><button class="pill-btn" data-close>關閉</button></div>
+  </div>
+</div>
+
+<script>
+/* ---------- 圖示（Material Icons 路徑） ---------- */
+// 3D 建築遮蔽先關閉：不在背景載入 3D 圖塊（最貴的 API），也藏起相關按鈕；改成 true 即可恢復
+const ENABLE_3D = false;
+if (!ENABLE_3D) document.body.classList.add('no3d');
+const ICONS = {
+  menu: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
+  search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+  arrow_back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+  chevron_left: 'M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z',
+  chevron_right: 'M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z',
+  bookmark: 'M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2z',
+  bookmark_border: 'M17 3H7c-1.1 0-1.99.9-1.99 2L5 21l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15-5-2.18L7 18V5h10v13z',
+  sun: 'M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7 1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91 1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z',
+  sun_back: 'M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8V9c1.65 0 3 1.35 3 3s-1.35 3-3 3z',
+  moon: 'M9.37 5.51A7.35 7.35 0 0 0 9.1 7.5c0 4.08 3.32 7.4 7.4 7.4.68 0 1.35-.09 1.99-.27A7.014 7.014 0 0 1 12 19c-3.86 0-7-3.14-7-7 0-2.93 1.81-5.45 4.37-6.49zM12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
+  contrast: 'M12 22C6.49 22 2 17.51 2 12S6.49 2 12 2s10 4.49 10 10-4.49 10-10 10zm0-18v16c4.41 0 8-3.59 8-8s-3.59-8-8-8z',
+  clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z',
+  place: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z',
+  camera: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM9 2 7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9z',
+  streetview: 'M12 2a2.2 2.2 0 1 1 0 4.4A2.2 2.2 0 0 1 12 2zm-2.4 5.2h4.8c1.1 0 2 .9 2 2V14h-2v8h-4.8v-8h-2V9.2c0-1.1.9-2 2-2z',
+  share: 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11A2.99 2.99 0 0 0 21 5c0-1.66-1.34-3-3-3s-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81A2.99 2.99 0 0 0 3 12a2.99 2.99 0 0 0 5.04 2.19l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z',
+  open: 'M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z',
+  my_location: 'M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z',
+  cube: 'M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.991.991 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15 6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z',
+  layers: 'M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z',
+  play: 'M8 5v14l11-7z',
+  cloud: 'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z',
+  phone: 'M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z',
+  web: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.93 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 0 1 5.08 16zm2.95-8H5.08a7.99 7.99 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z',
+  star: 'M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z',
+  pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+  upload: 'M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z',
+  download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
+  key: 'M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
+  add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
+  edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+  delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+  visibility: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
+  visibility_off: 'M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.804 11.804 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78 3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z',
+};
+const icon = (n, s = 24) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true"><path d="${ICONS[n]}"/></svg>`;
+function hydrateIcons(root = document) {
+  root.querySelectorAll('[data-icon]').forEach(el => {
+    if (el.dataset.iconDone) return;
+    el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon, +el.dataset.size || 24));
+    el.dataset.iconDone = 1;
+  });
+}
+hydrateIcons();
+
+/* ---------- 太陽位置演算法（公式源自 SunCalc, © Vladimir Agafonkin, BSD-2） ---------- */
+const Sun = (() => {
+  const PI = Math.PI, sin = Math.sin, cos = Math.cos, tan = Math.tan,
+        asin = Math.asin, atan = Math.atan2, acos = Math.acos, rad = PI / 180;
+  const dayMs = 864e5, J1970 = 2440588, J2000 = 2451545, J0 = 0.0009;
+  const e = rad * 23.4397;
+  const toDays = ms => ms / dayMs - 0.5 + J1970 - J2000;
+  const fromJulian = j => (j + 0.5 - J1970) * dayMs;
+  const rightAscension = l => atan(sin(l) * cos(e), cos(l));
+  const declination = l => asin(sin(e) * sin(l));
+  const meanAnomaly = d => rad * (357.5291 + 0.98560028 * d);
+  const eclipticLng = M => M + rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)) + rad * 102.9372 + PI;
+
+  // 回傳 { azimuth: 0=北 順時針, altitude: 度（含大氣折射修正） }
+  function position(ms, lat, lng) {
+    const lw = rad * -lng, phi = rad * lat, d = toDays(ms);
+    const L = eclipticLng(meanAnomaly(d));
+    const dec = declination(L), ra = rightAscension(L);
+    const H = rad * (280.16 + 360.9856235 * d) - lw - ra;
+    let alt = asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H)) / rad;
+    if (alt > -1) alt += 1.02 / Math.tan((alt + 10.3 / (alt + 5.11)) * rad) / 60;
+    const az = atan(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi)) / rad;
+    return { azimuth: (az + 180 + 360) % 360, altitude: alt };
+  }
+
+  // ms 請傳當地正午附近的時間
+  function times(ms, lat, lng) {
+    const lw = rad * -lng, phi = rad * lat, d = toDays(ms);
+    const n = Math.round(d - J0 - lw / (2 * PI));
+    const ds = J0 + lw / (2 * PI) + n;
+    const M = meanAnomaly(ds), L = eclipticLng(M), dec = declination(L);
+    const transit = a => J2000 + a + 0.0053 * sin(M) - 0.0069 * sin(2 * L);
+    const Jnoon = transit(ds);
+    const res = { noon: fromJulian(Jnoon) };
+    for (const [h, rise, set] of [[-0.833, 'sunrise', 'sunset'], [-6, 'dawn', 'dusk'],
+                                  [-4, 'blueEnd', 'blueStart'], [6, 'goldenEnd', 'goldenStart']]) {
+      const w = acos((sin(h * rad) - sin(phi) * sin(dec)) / (cos(phi) * cos(dec)));
+      const Jset = transit(J0 + (w + lw) / (2 * PI) + n);
+      res[set] = fromJulian(Jset);
+      res[rise] = fromJulian(Jnoon - (Jset - Jnoon));
+    }
+    return res;
+  }
+  // 月亮（SunCalc 公式）：位置與月相
+  const raE = (l, b) => atan(sin(l) * cos(e) - tan(b) * sin(e), cos(l));
+  const decE = (l, b) => asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l));
+  function moonCoords(d) {
+    const L = rad * (218.316 + 13.176396 * d), M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.229350 * d);
+    const l = L + rad * 6.289 * sin(M), b = rad * 5.128 * sin(F);
+    return { ra: raE(l, b), dec: decE(l, b), dist: 385001 - 20905 * cos(M) };
+  }
+  function moon(ms, lat, lng) {
+    const lw = rad * -lng, phi = rad * lat, d = toDays(ms), c = moonCoords(d);
+    const H = rad * (280.16 + 360.9856235 * d) - lw - c.ra;
+    let alt = asin(sin(phi) * sin(c.dec) + cos(phi) * cos(c.dec) * cos(H)) / rad;
+    if (alt > -1) alt += 1.02 / Math.tan((alt + 10.3 / (alt + 5.11)) * rad) / 60;
+    const az = atan(sin(H), cos(H) * sin(phi) - tan(c.dec) * cos(phi)) / rad;
+    // 月相：照亮比例 fraction、phase 0 新月 → .5 滿月 → 1
+    const L = eclipticLng(meanAnomaly(d)), sd = declination(L), sr = rightAscension(L), sdist = 149598000;
+    const ph = acos(sin(sd) * sin(c.dec) + cos(sd) * cos(c.dec) * cos(sr - c.ra));
+    const inc = atan(sdist * sin(ph), c.dist - sdist * cos(ph));
+    const ang = atan(cos(sd) * sin(sr - c.ra), sin(sd) * cos(c.dec) - cos(sd) * sin(c.dec) * cos(sr - c.ra));
+    return { azimuth: (az + 180 + 360) % 360, altitude: alt, fraction: (1 + cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (ang < 0 ? -1 : 1) / PI };
+  }
+  return { position, times, moon };
+})();
+const moonAt = (minutes = state.minutes, at = state.focus) => Sun.moon(msAt(minutes), at.lat, at.lng);
+const moonName = p => p < .03 || p > .97 ? '新月' : p < .22 ? '眉月' : p < .28 ? '上弦月' : p < .47 ? '盈凸月' : p < .53 ? '滿月' : p < .72 ? '虧凸月' : p < .78 ? '下弦月' : '殘月';
+// 月光強度 0～1：滿月高掛最亮，雲多就被遮住
+function moonLight(minutes = state.minutes, at = state.focus) {
+  const m = moonAt(minutes, at);
+  if (m.altitude <= 0) return { k: 0, m };
+  const wf = wxFactors(wxAt(minutes, at));
+  return { k: Math.pow(m.fraction, 1.5) * Math.min(1, Math.sin(m.altitude * rad) * 1.6) * (1 - .85 * wf.cover), m };
+}
+
+/* ---------- 工具 ---------- */
+const TZ = 8; // 台灣 UTC+8，無日光節約
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180;
+const norm180 = a => ((a % 360) + 540) % 360 - 180;
+const pad = n => String(n).padStart(2, '0');
+const fmtMin = m => `${pad(Math.floor(m / 60) % 24)}:${pad(Math.floor(m % 60))}`;
+// 中文輸入法選字中的按鍵（第一下 Enter 是確認選字，不是送出）。
+// Safari 會先結束組字再送出 Enter 的 keydown，所以組字剛結束的一瞬間也算
+let imeEndAt = 0;
+document.addEventListener('compositionend', () => { imeEndAt = performance.now(); }, true);
+const imeComposing = e => e.isComposing || e.keyCode === 229 || performance.now() - imeEndAt < 80;
+const fmtMs = ms => isNaN(ms) ? '—' : fmtMin(((ms / 60000 + TZ * 60) % 1440 + 1440) % 1440);
+const dirName = a => ['北','東北','東','東南','南','西南','西','西北'][Math.round(((a % 360) + 360) % 360 / 45) % 8];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2800); }
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+/* ---------- 狀態 ---------- */
+const state = {
+  sv: false,                        // 是否在街景模式
+  focus: { lat: 25.0339, lng: 121.5645 }, // 計算日照的位置
+  mapCenter: { lat: 25.0339, lng: 121.5645 }, mapZoom: 15,
+  mapType: lsGet('sunsv.mapType', 'roadmap'),
+  heading: 270, pitch: 10, zoom: 1,
+  date: null, minutes: 9 * 60,
+  selection: null,                  // 目前選取的地點 {name,address,lat,lng,placeId,savedId,note}
+  view: null,                       // 側面板目前的內容
+  listId: null,                     // 清單詳細頁
+  opts: { horizon: false, tint: true, mapSun: false, ...lsGet('sunsv.opts', {}), ...(lsGet('sunsv.opts', {}).v >= 2 ? {} : { path: false, v: 2 }), wx: 'auto' },   // 手動天氣只在這次瀏覽有效，重新整理回到自動
+};
+(function initDate() {
+  const now = new Date(Date.now() + TZ * 3600e3);
+  state.date = now.toISOString().slice(0, 10);
+  state.minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+})();
+const hashInit = (() => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (!p.has('lat')) return null;
+  const n = k => parseFloat(p.get(k));
+  state.mapCenter = { lat: n('lat'), lng: n('lng') };
+  state.focus = { ...state.mapCenter };
+  if (p.has('z')) state.mapZoom = n('z');
+  if (p.has('d')) state.date = p.get('d');
+  if (p.has('t')) state.minutes = n('t');
+  if (p.has('h')) { state.heading = n('h'); state.pitch = n('p') || 0; state.zoom = n('f') || 1; }
+  return { sv: p.get('sv') === '1' };
+})();
+
+function msAt(minutes) {
+  const [y, m, d] = state.date.split('-').map(Number);
+  return Date.UTC(y, m - 1, d) + minutes * 60000 - TZ * 3600e3;
+}
+const sunAt = (minutes, at = state.focus) => Sun.position(msAt(minutes), at.lat, at.lng);
+const timesAt = (at = state.focus) => Sun.times(msAt(720), at.lat, at.lng);
+
+// 依鏡頭朝向判斷光線類型
+function classify(sun, heading) {
+  if (sun.altitude <= -0.833) return { key: 'night', label: '無直射光', color: 'var(--night)' };
+  if (sun.altitude > 65) return { key: 'top', label: '頂光', color: 'var(--top)' };
+  const d = Math.abs(norm180(sun.azimuth - heading));
+  if (d < 40) return { key: 'back', label: '逆光', color: 'var(--back)' };
+  if (d < 75) return { key: 'sideback', label: '側逆光', color: 'var(--sideback)' };
+  if (d < 120) return { key: 'side', label: '側光', color: 'var(--sidelit)' };
+  return { key: 'front', label: '順光', color: 'var(--front)' };
+}
+// 地圖模式：依太陽高度分時段
+function classifyAlt(sun) {
+  const a = sun.altitude;
+  if (a < -6) return { label: '夜間', color: 'var(--night)' };
+  if (a < -4) return { label: '藍調', color: 'var(--bluehr)' };
+  if (a < 6) return { label: '金光', color: 'var(--golden)' };
+  return { label: '白天', color: 'var(--day)' };
+}
+const cssCache = {};
+const cssVar = v => v.startsWith('var(') ? (cssCache[v] ||= getComputedStyle(document.documentElement).getPropertyValue(v.slice(4, -1)).trim()) : v;
+
+/* ---------- 投影：太陽方向 → 街景畫面座標 ---------- */
+const fovOf = zoom => Math.min(150, Math.max(5, 180 / Math.pow(2, zoom)));
+function project(az, alt, pov, W, H) {
+  const A = az * rad, B = alt * rad, h = pov.heading * rad, p = pov.pitch * rad;
+  const d = [Math.cos(B) * Math.sin(A), Math.cos(B) * Math.cos(A), Math.sin(B)];
+  const f = [Math.cos(p) * Math.sin(h), Math.cos(p) * Math.cos(h), Math.sin(p)];
+  const r = [Math.cos(h), -Math.sin(h), 0];
+  const u = [-Math.sin(p) * Math.sin(h), -Math.sin(p) * Math.cos(h), Math.cos(p)];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const z = dot(d, f);
+  if (z <= 0.02) return null;
+  const fp = (W / 2) / Math.tan(fovOf(pov.zoom) / 2 * rad);
+  return { x: W / 2 + fp * dot(d, r) / z, y: H / 2 - fp * dot(d, u) / z };
+}
+
+/* ---------- 街景疊圖 ---------- */
+const overlay = $('overlay'), octx = overlay.getContext('2d');
+const compass = $('compass'), cctx = compass.getContext('2d');
+const bands = $('bands'), bctx = bands.getContext('2d');
+
+function fitCanvas(c) {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [w, h];
+}
+const pov = () => ({ heading: state.heading, pitch: state.pitch, zoom: state.zoom });
+
+function drawOverlay() {
+  const [W, H] = fitCanvas(overlay);
+  octx.clearRect(0, 0, W, H);
+  if (!state.sv) return;
+  const v = pov();
+
+  if (state.opts.horizon) {
+    octx.strokeStyle = 'rgba(255,255,255,.4)'; octx.setLineDash([6, 6]); octx.lineWidth = 1;
+    octx.beginPath(); let started = false;
+    for (let a = -90; a <= 90; a += 2) {
+      const pt = project(v.heading + a, 0, v, W, H);
+      if (!pt) continue;
+      started ? octx.lineTo(pt.x, pt.y) : octx.moveTo(pt.x, pt.y); started = true;
+    }
+    octx.stroke(); octx.setLineDash([]);
+  }
+
+  if (state.opts.path) {
+    // 整天軌跡，每 5 分鐘一點
+    octx.lineWidth = 2; octx.strokeStyle = 'rgba(255,190,80,.6)';
+    octx.beginPath(); let prev = null;
+    for (let m = 0; m <= 1440; m += 5) {
+      const s = sunAt(m);
+      const pt = s.altitude > -2 ? project(s.azimuth, s.altitude, v, W, H) : null;
+      if (pt && prev && Math.hypot(pt.x - prev.x, pt.y - prev.y) < W) octx.lineTo(pt.x, pt.y);
+      else if (pt) octx.moveTo(pt.x, pt.y);
+      prev = pt;
+    }
+    octx.stroke();
+    octx.font = '600 12px Roboto, -apple-system, sans-serif'; octx.textAlign = 'center';
+    for (let hr = 0; hr < 24; hr++) {
+      const s = sunAt(hr * 60);
+      if (s.altitude < -2) continue;
+      const pt = project(s.azimuth, s.altitude, v, W, H);
+      if (!pt) continue;
+      octx.fillStyle = 'rgba(255,200,100,.95)';
+      octx.beginPath(); octx.arc(pt.x, pt.y, 3.5, 0, 7); octx.fill();
+      octx.fillStyle = 'rgba(0,0,0,.6)'; octx.fillText(hr + '時', pt.x + 1, pt.y - 8);
+      octx.fillStyle = '#fff'; octx.fillText(hr + '時', pt.x, pt.y - 9);
+    }
+  }
+
+  if (!state.opts.path) return;   // 太陽位置圓點與畫面外箭頭也一起收起，只留真實光影
+  const s = sunAt(state.minutes);
+  const pt = project(s.azimuth, s.altitude, v, W, H);
+  const inView = pt && pt.x > -40 && pt.x < W + 40 && pt.y > -40 && pt.y < H + 40;
+  if (inView) {
+    const below = s.altitude < -0.833;
+    const g = octx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, 90);
+    g.addColorStop(0, below ? 'rgba(255,140,60,.35)' : 'rgba(255,240,200,.95)');
+    g.addColorStop(.18, below ? 'rgba(255,120,50,.2)' : 'rgba(255,200,90,.55)');
+    g.addColorStop(1, 'rgba(255,170,60,0)');
+    octx.fillStyle = g; octx.beginPath(); octx.arc(pt.x, pt.y, 90, 0, 7); octx.fill();
+    octx.fillStyle = below ? 'rgba(255,170,90,.6)' : '#fff8e0';
+    octx.beginPath(); octx.arc(pt.x, pt.y, 14, 0, 7); octx.fill();
+    octx.strokeStyle = below ? 'rgba(255,170,90,.8)' : '#f9ab00'; octx.lineWidth = 2; octx.stroke();
+    label(octx, `${below ? '地平線下 ' : ''}${s.altitude.toFixed(1)}°`, pt.x, pt.y + 34);
+  } else {
+    // 畫面外：邊緣箭頭指示
+    const rel = norm180(s.azimuth - v.heading);
+    let x, y;
+    if (pt) { x = Math.min(W - 40, Math.max(40, pt.x)); y = Math.min(H - 40, Math.max(70, pt.y)); }
+    else { x = rel < 0 ? 40 : W - 40; y = H / 2; }
+    const ang = pt ? Math.atan2(pt.y - y, pt.x - x) : (rel < 0 ? Math.PI : 0);
+    octx.save(); octx.translate(x, y); octx.rotate(ang);
+    octx.fillStyle = 'rgba(249,171,0,.95)';
+    octx.beginPath(); octx.moveTo(18, 0); octx.lineTo(-8, -12); octx.lineTo(-3, 0); octx.lineTo(-8, 12); octx.closePath(); octx.fill();
+    octx.restore();
+    const side = rel < 0 ? '左' : '右', fb = Math.abs(rel) < 90 ? '前' : '後';
+    label(octx, `太陽在${side}${fb}方 ${Math.abs(rel).toFixed(0)}°`, Math.min(W - 80, Math.max(80, x)), y + 30);
+  }
+}
+function label(ctx, txt, x, y) {
+  ctx.font = '500 13px Roboto, -apple-system, sans-serif'; ctx.textAlign = 'center';
+  const w = ctx.measureText(txt).width + 14;
+  ctx.fillStyle = 'rgba(32,33,36,.85)'; ctx.beginPath(); ctx.roundRect(x - w / 2, y - 14, w, 22, 11); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillText(txt, x, y + 2);
+}
+
+function drawCompass() {
+  if (!state.sv) return;
+  const [W, H] = fitCanvas(compass);
+  if (W < 20) return;   // 3D 視角時指南針是隱藏的
+  const cx = W / 2, cy = H / 2, R = W / 2 - 4;
+  cctx.clearRect(0, 0, W, H);
+  cctx.fillStyle = 'rgba(32,33,36,.8)'; cctx.beginPath(); cctx.arc(cx, cy, R, 0, 7); cctx.fill();
+  const at = (az, r) => [cx + Math.sin(az * rad) * r, cy - Math.cos(az * rad) * r];
+  const fov = fovOf(state.zoom);
+  cctx.fillStyle = 'rgba(138,180,248,.35)';
+  cctx.beginPath(); cctx.moveTo(cx, cy);
+  cctx.arc(cx, cy, R - 2, (state.heading - fov / 2 - 90) * rad, (state.heading + fov / 2 - 90) * rad); cctx.closePath(); cctx.fill();
+  cctx.font = '500 11px Roboto, sans-serif'; cctx.textAlign = 'center'; cctx.textBaseline = 'middle';
+  [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
+    const [x, y] = at(a, R - 10); cctx.fillStyle = t === 'N' ? '#f28b82' : 'rgba(255,255,255,.75)'; cctx.fillText(t, x, y);
+  });
+  const s = sunAt(state.minutes);
+  if (s.altitude > -0.833) {
+    const [sx, sy] = at(s.azimuth + 180, R * 0.55);
+    cctx.strokeStyle = 'rgba(0,0,0,.9)'; cctx.lineWidth = 4; cctx.lineCap = 'round';
+    cctx.beginPath(); cctx.moveTo(cx, cy); cctx.lineTo(sx, sy); cctx.stroke();
+    const r = (R - 18) * (1 - Math.max(0, s.altitude) / 90) + 6;
+    const [x, y] = at(s.azimuth, r);
+    cctx.fillStyle = '#f9ab00'; cctx.beginPath(); cctx.arc(x, y, 6, 0, 7); cctx.fill();
+  }
+  cctx.fillStyle = '#fff'; cctx.beginPath(); cctx.arc(cx, cy, 3, 0, 7); cctx.fill();
+}
+
+/* ---------- 時間色帶 ---------- */
+const TB_SOFT = '#9aa0a6';
+function drawBands() {
+  const [W, H] = fitCanvas(bands);
+  bctx.clearRect(0, 0, W, H);
+  const step = 5;
+  for (let m = 0; m < 1440; m += step) {
+    const s = sunAt(m + step / 2);
+    let c = state.sv ? classify(s, state.heading) : classifyAlt(s);
+    // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光（灰）；夜間維持深色
+    if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < .2 || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
+    bctx.fillStyle = cssVar(c.color);
+    bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
+  }
+  const t = timesAt();
+  bctx.fillStyle = '#fff';
+  for (const k of ['sunrise', 'sunset']) {
+    const m = (t[k] - msAt(0)) / 60000;
+    if (!isNaN(m)) bctx.fillRect(m / 1440 * W - 1, 0, 2, H);
+  }
+  drawSunlit();
+  const items = state.sv
+    ? [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光']]
+    : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
+  $('legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
+    (state.sv ? (ENABLE_3D ? '<span><i style="background:#fde293;border-radius:1px"></i>細條＝直射陽光</span><span><i style="background:#5f6368;border-radius:1px"></i>被建築遮住</span>' : '') : '');
+}
+
+/* ---------- 光線模擬 ---------- */
+// 晴天地面照度（lux）對太陽高度的近似值，取對數內插
+const LUX_TABLE = [[-18, 0.001], [-12, 0.008], [-6, 3.4], [-4, 30], [-2, 150], [0, 400], [5, 6000], [10, 15000],
+                   [20, 35000], [30, 60000], [45, 85000], [60, 100000], [90, 110000]];
+function luxAt(alt) {
+  if (alt <= LUX_TABLE[0][0]) return LUX_TABLE[0][1];
+  for (let i = 1; i < LUX_TABLE.length; i++) {
+    const [a1, l1] = LUX_TABLE[i - 1], [a2, l2] = LUX_TABLE[i];
+    if (alt <= a2) return Math.exp(Math.log(l1) + (Math.log(l2) - Math.log(l1)) * (alt - a1) / (a2 - a1));
+  }
+  return 110000;
+}
+function lightPhase(alt, minutes) {
+  const morning = minutes < 12 * 60;
+  if (alt < -18) return { name: '夜間', level: '全暗' };
+  if (alt < -12) return { name: morning ? '天文晨光' : '天文暮光', level: '幾乎全暗' };
+  if (alt < -6) return { name: morning ? '航海晨光' : '航海暮光', level: '很暗' };
+  if (alt < -4) return { name: '藍調時刻', level: '昏暗' };
+  if (alt < -0.833) return { name: morning ? '日出前' : '日落後', level: '偏暗' };
+  if (alt < 6) return { name: morning ? '日出・金色時段' : '日落・金色時段', level: '弱' };
+  if (alt < 20) return { name: morning ? '早晨斜光' : '傍晚斜光', level: '中' };
+  if (alt < 50) return { name: '白天', level: '強' };
+  return { name: '正午強光', level: '很強' };
+}
+const fmtLux = l => l >= 1000 ? `${Math.round(l / 1000).toLocaleString()},000` : l >= 10 ? Math.round(l).toString() : l.toFixed(l < 0.1 ? 3 : 1);
+const evOf = lux => Math.log2(lux / 2.5);
+
+// 依太陽高度內插的整體調色：[高度, 亮度, 對比, 飽和, 暖色, 相乘底色 RGB]
+const GRADE = [
+  [-18, .22, 1.1, .25, 0, [55, 70, 125]],
+  [-6, .35, 1.05, .4, 0, [80, 95, 160]],
+  [-3, .55, 1, .6, 0, [140, 140, 200]],
+  [0, .75, 1, .9, .15, [255, 190, 160]],
+  [5, .9, 1.05, 1.2, .3, [255, 205, 150]],
+  [12, .97, 1.05, 1.15, .15, [255, 232, 200]],
+  [25, 1.02, 1.06, 1.08, 0, [255, 250, 240]],
+  [60, 1.06, 1.1, 1.05, 0, [255, 255, 255]],
+];
+function gradeAt(alt) {
+  if (alt <= GRADE[0][0]) return GRADE[0];
+  for (let i = 1; i < GRADE.length; i++) {
+    const a = GRADE[i - 1], b = GRADE[i];
+    if (alt <= b[0]) {
+      const t = (alt - a[0]) / (b[0] - a[0]), mix = (x, y) => x + (y - x) * t;
+      return [alt, mix(a[1], b[1]), mix(a[2], b[2]), mix(a[3], b[3]), mix(a[4], b[4]), a[5].map((v, k) => Math.round(mix(v, b[5][k])))];
+    }
+  }
+  return GRADE[GRADE.length - 1];
+}
+
+/* ---------- 天氣（Open-Meteo 每小時資料，免金鑰） ---------- */
+// 過去的日期：實際發生的天氣（歷史紀錄）；今天到 7 天內：預報；更久以後：預報不準，預設晴天，要下雨請手動切換
+const WX = { cache: new Map() };
+const WX_FORECAST_DAYS = 7;
+const todayTW = () => new Date(Date.now() + TZ * 3600e3).toISOString().slice(0, 10);
+const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
+const WX_PRESETS = {
+  clear:  { name: '晴天', cloud: 0, low: 0, mid: 0, high: 0, precip: 0, vis: 30000, code: 0 },
+  partly: { name: '多雲', cloud: 55, low: 35, mid: 30, high: 20, precip: 0, vis: 25000, code: 2 },
+  overcast: { name: '陰天', cloud: 100, low: 95, mid: 80, high: 50, precip: 0, vis: 15000, code: 3 },
+  rain:   { name: '下雨', cloud: 100, low: 100, mid: 90, high: 60, precip: 4, vis: 5000, code: 63 },
+  fog:    { name: '起霧', cloud: 100, low: 100, mid: 40, high: 10, precip: 0, vis: 600, code: 45 },
+};
+const wxKey = (at, date) => `${at.lat.toFixed(2)},${at.lng.toFixed(2)},${date}`;
+function ensureWeather(at = state.focus, date = state.date) {
+  const k = wxKey(at, date);
+  if (WX.cache.has(k)) return;
+  const diff = dayDiff(date, todayTW());
+  if (diff > WX_FORECAST_DAYS) { WX.cache.set(k, 'longrange'); return; }
+  WX.cache.set(k, 'loading');
+  const q = `latitude=${at.lat.toFixed(3)}&longitude=${at.lng.toFixed(3)}&timezone=Asia%2FTaipei&start_date=${date}&end_date=${date}` +
+    '&hourly=cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,weather_code';
+  const get = (url, kind) => fetch(url).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(j => {
+    const h = j.hourly;
+    if (!h || h.cloud_cover.some(v => v == null)) return Promise.reject('empty');
+    // 歷史資料沒有能見度：霧的天氣代碼（45、48）當作能見度 800 公尺
+    return h.time.map((_, i) => ({ cloud: h.cloud_cover[i], low: h.cloud_cover_low[i], mid: h.cloud_cover_mid[i], high: h.cloud_cover_high[i],
+      precip: h.precipitation[i], vis: h.visibility?.[i] ?? (h.weather_code[i] === 45 || h.weather_code[i] === 48 ? 800 : 20000),
+      code: h.weather_code[i], pop: h.precipitation_probability?.[i], kind }));
+  });
+  const forecast = () => get('https://api.open-meteo.com/v1/forecast?' + q + ',visibility,precipitation_probability', 'forecast');
+  const job = diff < 0 ? get('https://archive-api.open-meteo.com/v1/archive?' + q, 'actual').catch(forecast) : forecast();
+  job.then(hrs => { WX.cache.set(k, hrs); render({ bandsToo: true }); })
+    .catch(() => { WX.cache.set(k, 'none'); render(); });
+}
+/* 中央氣象署 鄉鎮天氣預報（需授權碼）：未來 3 天逐 3 小時（F-D0047-089）、未來一週逐 12 小時（F-D0047-091）
+   只有文字天氣現象與降雨機率，沒有雲量數字，這裡把文字換算成畫面用的雲量、雨量 */
+const CWA = {
+  key: () => { try { return localStorage.getItem('cwaKey') || ''; } catch { return ''; } },
+  sets: { d3: null, d7: null },   // null＝還沒抓、'loading'、'fail'、或 [{lat,lng,name,wx:[{s,e,t}],pop:[{s,e,v}]}]
+};
+function cwaFetch(which) {
+  if (!CWA.key() || CWA.sets[which]) return;
+  CWA.sets[which] = 'loading';
+  const id = which === 'd3' ? 'F-D0047-089' : 'F-D0047-091';
+  fetch(`https://opendata.cwa.gov.tw/api/v1/rest/datastore/${id}?Authorization=${encodeURIComponent(CWA.key())}&format=JSON`)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(j => { CWA.sets[which] = cwaParse(j); CWA.at = Date.now(); render({ bandsToo: true }); })
+    .catch(err => { console.warn('氣象署預報失敗', err); CWA.sets[which] = 'fail'; render(); });
+}
+// 新舊兩種 JSON 格式（大小寫欄位名）都接受
+function cwaParse(j) {
+  const pick = (o, ...ks) => { for (const k of ks) if (o?.[k] != null) return o[k]; };
+  const recs = pick(j, 'records'), groups = pick(recs, 'Locations', 'locations') || [];
+  const out = [];
+  for (const g of groups) for (const loc of pick(g, 'Location', 'location') || []) {
+    const lat = +pick(loc, 'Latitude', 'lat'), lng = +pick(loc, 'Longitude', 'lon');
+    if (!isFinite(lat) || !isFinite(lng)) continue;
+    const item = { lat, lng, name: (pick(g, 'LocationsName', 'locationsName') || '') + pick(loc, 'LocationName', 'locationName'), wx: [], pop: [] };
+    for (const el of pick(loc, 'WeatherElement', 'weatherElement') || []) {
+      const en = pick(el, 'ElementName', 'elementName') || '';
+      const isWx = /天氣現象|^Wx$/.test(en), isPop = /降雨機率|^PoP/.test(en);
+      if (!isWx && !isPop) continue;
+      for (const t of pick(el, 'Time', 'time') || []) {
+        const s = Date.parse(pick(t, 'StartTime', 'startTime', 'DataTime', 'dataTime')), e = Date.parse(pick(t, 'EndTime', 'endTime')) || s + 3 * 3600e3;
+        const v = (pick(t, 'ElementValue', 'elementValue') || [])[0] || {};
+        if (isWx) item.wx.push({ s, e, t: pick(v, 'Weather', 'value') || '' });
+        else { const n = parseFloat(pick(v, 'ProbabilityOfPrecipitation', 'value')); if (isFinite(n)) item.pop.push({ s, e, v: n }); }
+      }
+    }
+    if (item.wx.length) out.push(item);
+  }
+  return out.length ? out : 'fail';
+}
+// 氣象署的文字天氣 → 雲量、雨量、能見度
+function cwaToWx(text, pop) {
+  const cloud = /陰時多雲/.test(text) ? 92 : /多雲時陰/.test(text) ? 85 : /陰/.test(text) ? 100 : /多雲時晴/.test(text) ? 50
+    : /晴時多雲/.test(text) ? 30 : /多雲/.test(text) ? 70 : /晴/.test(text) ? 8 : 60;
+  const rainy = /雨/.test(text) && (pop == null || pop >= 50);
+  const precip = !rainy ? 0 : /雷/.test(text) ? 6 : /大雨|豪雨/.test(text) ? 10 : /短暫|陣/.test(text) ? 1.5 : 3;
+  const vis = /霧/.test(text) ? 800 : rainy ? 6000 : 20000;
+  return { cloud, low: cloud, mid: cloud * .7, high: cloud * .4, precip, vis, code: 0, text, pop };
+}
+// 某時刻（毫秒）氣象署的天氣；3 天內用逐 3 小時、之後用逐 12 小時
+function cwaAt(ms, at = state.focus) {
+  if (!CWA.key()) return null;
+  cwaFetch('d3'); cwaFetch('d7');
+  for (const which of ['d3', 'd7']) {
+    const set = CWA.sets[which];
+    if (!Array.isArray(set)) continue;
+    let best = null, bd = Infinity;
+    for (const l of set) { const d = (l.lat - at.lat) ** 2 + ((l.lng - at.lng) * Math.cos(at.lat * rad)) ** 2; if (d < bd) { bd = d; best = l; } }
+    const w = best?.wx.find(x => ms >= x.s && ms < x.e);
+    if (!w) continue;
+    const p = best.pop.find(x => ms >= x.s && ms < x.e);
+    return { ...cwaToWx(w.t, p?.v), src: 'cwa', span: which === 'd3' ? 3 : 12, from: w.s, to: w.e, town: best.name };
+  }
+  return null;
+}
+
+// 某分鐘的天氣：手動模式用預設值，自動模式在前後兩個整點之間內插
+function wxAt(minutes = state.minutes, at = state.focus) {
+  const mode = state.opts.wx || 'auto';
+  if (mode !== 'auto') return { ...WX_PRESETS[mode], src: 'manual' };
+  if (dayDiff(state.date, todayTW()) >= 0) { const c = cwaAt(msAt(minutes), at); if (c) return c; }
+  const hrs = WX.cache.get(wxKey(at, state.date));
+  if (!Array.isArray(hrs)) return { ...WX_PRESETS.clear, src: hrs || 'loading' };
+  const i = Math.min(23, Math.floor(minutes / 60)), j = Math.min(23, i + 1), t = (minutes % 60) / 60;
+  const a = hrs[i], b = hrs[j], mix = k => (a[k] ?? 0) + ((b[k] ?? 0) - (a[k] ?? 0)) * t;
+  return { cloud: mix('cloud'), low: mix('low'), mid: mix('mid'), high: mix('high'), precip: mix('precip'), vis: mix('vis'), code: t < .5 ? a.code : b.code,
+    pop: a.pop == null ? null : Math.round(mix('pop')), src: a.kind };
+}
+// 天氣轉成畫面係數：direct＝直射陽光剩幾成、rain＝雨勢、fog＝霧氣濃度、cover＝雲遮程度
+function wxFactors(w) {
+  const cover = Math.min(1, .5 * w.low / 100 + .3 * w.mid / 100 + .1 * w.high / 100 + .3 * w.cloud / 100);
+  const rain = Math.min(1, w.precip / 5);
+  let direct = Math.pow(1 - cover, 1.4);
+  if (w.precip > .2) direct *= .2;
+  const fog = Math.max(0, Math.min(1, 1 - (w.vis - 500) / 9500));
+  return { cover, rain, fog, direct };
+}
+const WMO = c => c === 0 ? '晴' : c === 1 ? '大致晴朗' : c === 2 ? '局部多雲' : c === 3 ? '陰' : c === 45 || c === 48 ? '霧'
+  : c >= 51 && c <= 57 ? '毛毛雨' : c >= 61 && c <= 67 ? '雨' : c >= 71 && c <= 77 ? '雪' : c >= 80 && c <= 82 ? '陣雨' : c >= 95 ? '雷雨' : '多雲';
+function wxText(w) {
+  if (w.src === 'loading') return '正在取得天氣預報…';
+  const parts = [`${WMO(Math.round(w.code))}`, `雲量 ${Math.round(w.cloud)}%`];
+  if (w.precip >= .1) parts.push(`雨量 ${w.precip.toFixed(1)} mm/時`);
+  if (w.vis < 5000) parts.push(`能見度 ${(w.vis / 1000).toFixed(1)} km`);
+  if (w.src === 'manual') return `手動天氣：${WX_PRESETS[state.opts.wx].name}`;
+  if (w.src === 'cwa') return `氣象署${w.span === 3 ? '' : '一週'}預報（${w.town}）${w.text}${w.pop != null ? ` · 降雨機率 ${w.pop}%` : ''}`;
+  if (w.src === 'longrange') return `超過 ${WX_FORECAST_DAYS} 天沒有可靠預報，先以晴天模擬`;
+  if (w.src === 'none') return '查不到這天的天氣，以晴天模擬';
+  return `${w.src === 'actual' ? '實際天氣' : '預報'} ${parts.join(' · ')}`;
+}
+
+/* 雨絲：獨立畫布、只在街景且有雨時動畫 */
+const rainC = $('rain'), rctx = rainC.getContext('2d');
+const RAIN = { drops: [], raf: 0, amt: 0, night: 0 };
+function setRain(amt, night) {
+  RAIN.amt = amt; RAIN.night = night;
+  if (amt > 0 && state.sv && !RAIN.raf) RAIN.raf = requestAnimationFrame(rainFrame);
+  if (!(amt > 0) || !state.sv) { cancelAnimationFrame(RAIN.raf); RAIN.raf = 0; const [W, H] = fitCanvas(rainC); rctx.clearRect(0, 0, W, H); }
+}
+function rainFrame() {
+  RAIN.raf = 0;
+  if (!(RAIN.amt > 0) || !state.sv) return;
+  const [W, H] = fitCanvas(rainC);
+  const want = Math.round(W * H / 2600 * (0.25 + RAIN.amt));
+  while (RAIN.drops.length < want) RAIN.drops.push({ x: Math.random() * W, y: Math.random() * H, z: .3 + Math.random() * .7 });
+  RAIN.drops.length = want;
+  rctx.clearRect(0, 0, W, H);
+  rctx.lineCap = 'round';
+  const wind = -.18, alpha = (RAIN.night ? .22 : .32) * (.5 + RAIN.amt * .5);
+  for (const d of RAIN.drops) {
+    const len = 10 + 26 * d.z, sp = (14 + 26 * d.z);
+    rctx.strokeStyle = `rgba(${RAIN.night ? '190,200,215' : '225,232,240'},${(alpha * d.z).toFixed(3)})`;
+    rctx.lineWidth = .6 + d.z;
+    rctx.beginPath(); rctx.moveTo(d.x, d.y); rctx.lineTo(d.x + wind * len, d.y + len); rctx.stroke();
+    d.y += sp; d.x += wind * sp;
+    if (d.y > H) { d.y = -len; d.x = Math.random() * W * 1.2; }
+  }
+  RAIN.raf = requestAnimationFrame(rainFrame);
+}
+
+/* ---------- 夜間路燈 ---------- */
+// 路燈用感光開關：環境亮度低於約 55 lux 點燈、早上高於約 82.5 lux 熄燈（參考香港路政署公布的門檻；台灣也多為感光自動點燈）
+// 晴天大約在日落後 10～15 分鐘點燈；陰雨天天色暗得早，可能在日落前就亮
+const LAMP_ON_LUX = 55, LAMP_OFF_LUX = 82.5;
+function ambientLux(minutes, at = state.focus) {
+  const alt = sunAt(minutes, at).altitude, wf = wxFactors(wxAt(minutes, at));
+  return luxAt(alt) * (1 - .8 * wf.cover - .1 * wf.rain);
+}
+// 回傳路燈的亮度係數（0＝沒開）：剛點燈時天還亮，燈光不明顯；越暗越明顯
+function lampLevel(minutes = state.minutes, at = state.focus) {
+  const lux = ambientLux(minutes, at), thr = minutes < 720 ? LAMP_OFF_LUX : LAMP_ON_LUX;
+  if (lux >= thr) return 0;
+  return Math.max(.25, Math.min(1, .25 + .75 * (Math.log10(thr) - Math.log10(Math.max(lux, .01))) / (Math.log10(thr) - Math.log10(2))));
+}
+// 今天傍晚約幾點點燈、清晨約幾點熄燈
+function lampTimes(at = state.focus) {
+  let on = null, off = null;
+  for (let m = 720; m < 1440; m++) if (ambientLux(m, at) < LAMP_ON_LUX) { on = m; break; }
+  for (let m = 0; m < 720; m++) if (ambientLux(m, at) >= LAMP_OFF_LUX) { off = m; break; }
+  return { on, off };
+}
+// 路燈資料（都放在網頁資料夾，不需要即時連線）：
+//  ① 臺北市政府路燈位置（lights/tpe/）
+//  ② OpenStreetMap 全台資料（lights/osm/）：路燈點位、道路是否有照明（lit）、每 200 公尺的建築數
+// 每 0.01° 一個檔案，只載入附近 3×3 格
+const LAMPS = { tpe: new Map(), osm: new Map() };
+// 臺北市只有 261 格有資料；先讀索引，其他地方就不用發出注定 404 的請求
+LAMPS.tpeIndex = null;
+fetch('lights/tpe-index.json').then(r => r.json()).then(a => { LAMPS.tpeIndex = new Set(a); render(); }).catch(() => { LAMPS.tpeIndex = new Set(); });
+function lampTile(kind, cy, cx) {
+  const map = LAMPS[kind], k = `${cy}_${cx}`;
+  if (kind === 'tpe') { if (!LAMPS.tpeIndex) return 'loading'; if (!LAMPS.tpeIndex.has(k)) return null; }
+  if (!map.has(k)) {
+    map.set(k, 'loading');
+    fetch(`lights/${kind}/${k}.json`).then(r => r.ok ? r.json() : null).catch(() => null)
+      .then(a => { map.set(k, a); render(); });
+  }
+  return map.get(k);
+}
+// 這附近有多「市區」：0＝山區荒野、1＝市中心。綜合建築密度、道路照明標記、路燈點位
+function urbanInfo(at = state.focus) {
+  const cy = Math.floor(at.lat * 100), cx = Math.floor(at.lng * 100);
+  const sy = Math.min(4, Math.floor((at.lat * 100 - cy) * 5)), sx = Math.min(4, Math.floor((at.lng * 100 - cx) * 5));
+  let near = 0, total = 0, litYes = false, litNo = false, loading = false;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const t = lampTile('osm', cy + dy, cx + dx);
+    if (t === 'loading') { loading = true; continue; }
+    if (!t) continue;
+    total += t.b.reduce((a, b) => a + b, 0);
+    // 周圍 3×3 個 200 公尺小格
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      const gy = sy + j - dy * 5, gx = sx + i - dx * 5;
+      if (gy < 0 || gy > 4 || gx < 0 || gx > 4) continue;
+      const idx = gy * 5 + gx;
+      near += t.b[idx];
+      if (j === 0 && i === 0 && dy === 0 && dx === 0) { litYes = t.lit[idx] === 1 || t.lit[idx] === 3; litNo = t.lit[idx] === 2; }
+    }
+  }
+  // 校正：台北市中心 600 公尺內約 250 棟以上、3 公里方格約 6000 棟以上；山上聚落只有幾十棟
+  const urban = Math.max(Math.min(1, near / 250), Math.min(1, total / 6000) * .8, litYes ? .7 : 0);
+  return { urban, litYes, litNo, loading };
+}
+// 附近路燈 [{d 距離公尺, az 方位, h 燈高, sodium}] 與資料來源
+function nearbyLamps(at = state.focus, R = 70) {
+  const cy = Math.floor(at.lat * 100), cx = Math.floor(at.lng * 100);
+  const mLat = 111320, mLng = 111320 * Math.cos(at.lat * rad);
+  const polar = (lat, lng) => { const ny = (lat - at.lat) * mLat, ex = (lng - at.lng) * mLng; return { d: Math.hypot(ex, ny), az: (Math.atan2(ex, ny) / rad + 360) % 360 }; };
+  let tpe = [], osm = [], loading = false;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const a = lampTile('tpe', cy + dy, cx + dx), b = lampTile('osm', cy + dy, cx + dx);
+    if (a === 'loading' || b === 'loading') loading = true;
+    if (Array.isArray(a)) tpe = tpe.concat(a);
+    if (b && b.l) osm = osm.concat(b.l);
+  }
+  if (loading) return { lamps: [], src: 'loading', urban: 0 };
+  const u = urbanInfo(at);
+  const pick = (arr, h, sod) => arr.map(r => ({ ...polar(r[0], r[1]), h: r[2] ?? h, sodium: sod ? !!r[3] : false })).filter(p => p.d < R && p.d > 2);
+  const real = tpe.length ? pick(tpe, 8, true) : [];
+  if (real.length) return { lamps: real, src: 'tpe', urban: Math.max(u.urban, .6) };
+  const ol = pick(osm, 8, false);
+  if (ol.length) return { lamps: ol, src: 'osm', urban: Math.max(u.urban, .5) };
+  // 台北市資料範圍內但附近一盞都沒有：真的沒有路燈（例如山上步道）
+  if (tpe.length) return { lamps: [], src: 'none', urban: u.urban };
+  // 沒有點位資料：道路標記沒照明、或建築很少（山區）就不放燈；市區沿道路推估
+  if (u.litNo || u.urban < .2) return { lamps: [], src: 'rural', urban: u.urban };
+  const step = u.urban >= .5 ? 30 : 45, both = u.urban >= .5;
+  const links = pano?.getLinks?.() || [], out = [];
+  links.forEach((l, n) => {
+    for (let dist = 12; dist < R; dist += step) for (const side of both ? [-1, 1] : [n % 2 ? 1 : -1]) {
+      const ex = Math.sin(l.heading * rad) * dist + Math.cos(l.heading * rad) * 7 * side;
+      const ny = Math.cos(l.heading * rad) * dist - Math.sin(l.heading * rad) * 7 * side;
+      out.push({ d: Math.hypot(ex, ny), az: (Math.atan2(ex, ny) / rad + 360) % 360, h: 8, sodium: false });
+    }
+  });
+  return { lamps: out, src: 'guess', urban: u.urban };
+}
+/* ---------- 建築遮擋（OpenStreetMap 建築輪廓與高度，lights/bld/） ---------- */
+// 用來判斷：太陽有沒有被大樓擋住、鏡頭正對的立面有沒有照到太陽、路燈有沒有被建築擋住
+const BLD = { tiles: new Map(), key: '', local: null };
+function bldTile(cy, cx) {
+  const k = `${cy}_${cx}`;
+  if (!BLD.tiles.has(k)) {
+    BLD.tiles.set(k, 'loading');
+    fetch(`lights/bld/${k}.json`).then(r => r.ok ? r.json() : []).catch(() => [])
+      .then(a => { BLD.tiles.set(k, a); BLD.key = ''; render({ bandsToo: true }); });
+  }
+  return BLD.tiles.get(k);
+}
+// 以鏡頭為原點（公尺，x 往東、y 往北）的附近建築；資料還在載入回傳 null
+function bldLocal(at = state.focus, R = 320) {
+  const key = at.lat.toFixed(5) + ',' + at.lng.toFixed(5);
+  if (BLD.key === key) return BLD.local;
+  const cy = Math.floor(at.lat * 100), cx = Math.floor(at.lng * 100);
+  const mLat = 111320, mLng = 111320 * Math.cos(at.lat * rad), list = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const t = bldTile(cy + dy, cx + dx);
+    if (t === 'loading') return null;
+    const oy = (cy + dy) / 100, ox = (cx + dx) / 100;
+    for (const b of t) {
+      const pts = [];
+      let near = false;
+      for (let i = 1; i < b.length; i += 2) {
+        const x = (ox + b[i + 1] / 1e5 - at.lng) * mLng, y = (oy + b[i] / 1e5 - at.lat) * mLat;
+        if (Math.abs(x) < R && Math.abs(y) < R) near = true;
+        pts.push([x, y]);
+      }
+      if (!near) continue;
+      // 沒有高度資料：依面積推估（大型建築多半比較高）
+      let area = 0; for (let i = 0; i < pts.length; i++) { const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length]; area += x1 * y2 - x2 * y1; }
+      area = Math.abs(area) / 2;
+      const h = b[0] || (area > 2500 ? 35 : area > 800 ? 22 : area > 150 ? 13 : 7);
+      // 鏡頭在騎樓或建築輪廓裡面時，忽略那一棟
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, yi] = pts[i], [xj, yj] = pts[j];
+        if ((yi > 0) !== (yj > 0) && 0 < (xj - xi) * (0 - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      if (!inside) list.push({ h, pts });
+    }
+  }
+  BLD.key = key; BLD.local = list;
+  return list;
+}
+// 從 (ox, oy) 沿方位 az 射出，回傳打到的牆 [{d 距離, h 建築高, b 建築, nx, ny 牆面朝外法線}]，近到遠排序
+function rayHits(ox, oy, az, maxD, list) {
+  const dx = Math.sin(az * rad), dy = Math.cos(az * rad), hits = [];
+  for (const b of list) {
+    const p = b.pts;
+    for (let i = 0; i < p.length; i++) {
+      const [px, py] = p[i], [qx, qy] = p[(i + 1) % p.length], ex = qx - px, ey = qy - py;
+      const cr = dx * ey - dy * ex;
+      if (Math.abs(cr) < 1e-9) continue;
+      const t = ((px - ox) * ey - (py - oy) * ex) / cr, u = ((px - ox) * dy - (py - oy) * dx) / cr;
+      if (t > .3 && t <= maxD && u >= 0 && u <= 1) {
+        let nx = ey, ny = -ex; const L = Math.hypot(nx, ny); nx /= L; ny /= L;
+        if (nx * dx + ny * dy > 0) { nx = -nx; ny = -ny; }
+        hits.push({ d: t, h: b.h, b, nx, ny });
+      }
+    }
+  }
+  return hits.sort((a, b) => a.d - b.d);
+}
+// 離地 z 公尺的一點，往太陽方向看會不會被建築擋住
+function sunBlockedAt(ox, oy, z, az, alt, list, skip) {
+  if (alt <= 0) return true;
+  for (const h of rayHits(ox, oy, az, 450, list)) if (h.b !== skip && Math.atan2(h.h - z, h.d) / rad > alt) return true;
+  return false;
+}
+// 某時刻：鏡頭位置是否在建築陰影中、鏡頭正前方那面建築立面是否照到太陽
+function shadeState(minutes = state.minutes, heading = state.heading) {
+  const list = bldLocal();
+  if (!list || !list.length) return null;
+  const s = sunAt(minutes);
+  if (s.altitude <= 0) return { camShaded: false, facade: null };
+  const camShaded = sunBlockedAt(0, 0, 1.6, s.azimuth, s.altitude, list);
+  const front = rayHits(0, 0, heading, 150, list)[0];
+  let facade = null;
+  if (front) {
+    const px = Math.sin(heading * rad) * front.d + front.nx * .6, py = Math.cos(heading * rad) * front.d + front.ny * .6;
+    const faceAz = (Math.atan2(front.nx, front.ny) / rad + 360) % 360;
+    const toward = Math.abs(norm180(s.azimuth - faceAz)) < 88;
+    const z = Math.min(front.h * .4, 12);
+    facade = { d: front.d, faceAz, toward, lit: toward && !sunBlockedAt(px, py, z, s.azimuth, s.altitude, list, front.b) };
+  }
+  return { camShaded, facade };
+}
+// 被拍的主體（正前方立面，沒有就是鏡頭所在位置）是否被建築擋住陽光
+function subjectShaded(minutes = state.minutes, heading = state.heading) {
+  const st = shadeState(minutes, heading);
+  if (!st) return null;
+  return st.facade ? (st.facade.toward && !st.facade.lit) : st.camShaded;
+}
+
+// 路燈照明：
+//  ① 相乘層（夜色）上用「變亮」合成挖出被照亮的範圍：地面一大片光圈＋燈桿周圍的牆面，照片細節會露出來並帶燈色
+//  ② 濾色層只畫燈頭本身的小光點與光暈
+//  ③ 整條街另加一點都市環境光（店家、招牌、天空反光），街道不會全黑
+function drawLamps(W, H, v, nightK, wx, base) {
+  if (nightK <= 0.01) return;
+  const { lamps, urban } = nearbyLamps();
+  const fp = (W / 2) / Math.tan(fovOf(v.zoom) / 2 * rad), CAM = 2.5;
+  const haze = 1 + wx.fog * .8 + wx.rain * .3;
+  const hz = project(v.heading, 0, v, W, H), hy = hz ? hz.y : H / 2;
+  const mixc = (c, k) => base.map((b, i) => Math.round(b + (c[i] - b) * k));
+
+  sctx.save();
+  sctx.globalCompositeOperation = 'lighten';
+  // 都市環境光：地平線以下（街道、一樓店面）稍微亮一點、偏暖
+  const amb = sctx.createLinearGradient(0, hy - H * .15, 0, H);
+  amb.addColorStop(0, `rgb(${mixc([255, 214, 170], .0)})`);
+  amb.addColorStop(.35, `rgb(${mixc([255, 214, 170], .22 * nightK * urban)})`);
+  amb.addColorStop(1, `rgb(${mixc([255, 214, 170], .12 * nightK * urban)})`);
+  sctx.fillStyle = amb; sctx.fillRect(0, 0, W, H);
+
+  // 被建築擋住的路燈不畫（燈和鏡頭之間有牆）
+  const blist = bldLocal() || [];
+  for (const L of lamps) L.hidden = blist.length > 0 && rayHits(0, 0, L.az, L.d - 1.5, blist).length > 0;
+  lamps.sort((a, b) => b.d - a.d);
+  for (const L of lamps) {
+    if (L.hidden) continue;
+    const col = L.sodium ? [255, 176, 92] : [255, 226, 192];
+    const k = nightK * Math.min(1, 1.15 * Math.pow(12 / Math.max(L.d, 6), .55));   // 遠的燈照得比較弱
+    const foot = project(L.az, Math.atan2(-CAM, L.d) / rad, v, W, H);
+    const mid = project(L.az, Math.atan2(L.h * .45 - CAM, L.d) / rad, v, W, H);
+    if (foot) {
+      // 地面：路燈照亮直徑約 24 公尺的路面
+      const rx = Math.min(W * 1.2, fp * 12 / L.d * haze), ry = Math.max(rx * .14, Math.min(rx * .7, rx * CAM * 2.2 / L.d));
+      sctx.save(); sctx.translate(foot.x, foot.y); sctx.scale(1, ry / rx);
+      const g = sctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+      g.addColorStop(0, `rgb(${mixc(col, k)})`);
+      g.addColorStop(.45, `rgb(${mixc(col, k * .6)})`);
+      g.addColorStop(1, `rgb(${base})`);
+      sctx.fillStyle = g; sctx.beginPath(); sctx.arc(0, 0, rx, 0, 7); sctx.fill(); sctx.restore();
+    }
+    if (mid) {
+      // 燈桿周圍的牆面、樹、招牌
+      const r = Math.min(W, fp * 7 / L.d * haze);
+      const g = sctx.createRadialGradient(mid.x, mid.y, 0, mid.x, mid.y, r);
+      g.addColorStop(0, `rgb(${mixc(col, k * .75)})`);
+      g.addColorStop(1, `rgb(${base})`);
+      sctx.fillStyle = g; sctx.beginPath(); sctx.arc(mid.x, mid.y, r, 0, 7); sctx.fill();
+    }
+  }
+  sctx.restore();
+
+  // 燈頭：亮點＋光暈（雨霧天比較散）
+  for (const L of lamps) {
+    if (L.hidden) continue;
+    const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
+    if (!head) continue;
+    const col = L.sodium ? '255,176,92' : '255,226,192', a = nightK * Math.min(1, 10 / L.d + .25);
+    const r = Math.max(5, Math.min(70, fp * .7 / L.d)) * haze;
+    const g = gctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
+    g.addColorStop(0, `rgba(255,252,245,${Math.min(1, a).toFixed(3)})`);
+    g.addColorStop(.1, `rgba(${col},${(a * .8).toFixed(3)})`);
+    g.addColorStop(.4, `rgba(${col},${(a * .18).toFixed(3)})`);
+    g.addColorStop(1, `rgba(${col},0)`);
+    gctx.fillStyle = g; gctx.beginPath(); gctx.arc(head.x, head.y, r, 0, 7); gctx.fill();
+  }
+}
+
+const shadeC = $('shade'), sctx = shadeC.getContext('2d');
+const glowC = $('glow'), gctx = glowC.getContext('2d');
+function drawLight() {
+  const [W, H] = fitCanvas(shadeC); fitCanvas(glowC);
+  sctx.clearRect(0, 0, W, H); gctx.clearRect(0, 0, W, H);
+  const panoEl = $('pano');
+  if (!state.sv || !state.opts.tint) { panoEl.style.filter = ''; setRain(0); return; }
+  const s = sunAt(state.minutes), alt = s.altitude, v = pov();
+  let [, br, ct, sat, warm, base] = gradeAt(alt);
+  // 天氣：雲越厚，反差、飽和、暖色越低，底色往冷灰靠；下雨再壓暗、偏冷
+  const wx = wxFactors(wxAt()), day = Math.max(0, Math.min(1, (alt + 4) / 10));
+  ct *= 1 - .2 * wx.cover * day - .08 * wx.fog;
+  sat *= 1 - (.32 * wx.cover + .15 * wx.rain) * day - .2 * wx.fog;
+  warm *= wx.direct;
+  br *= 1 - (.1 * wx.cover + .14 * wx.rain) * day;
+  const grey = [222, 228, 236], gk = Math.min(1, wx.cover * .85 + wx.rain * .3) * day;
+  base = base.map((c, i) => Math.round(c + (grey[i] - c) * gk));
+  // 夜間：照片本身維持亮度，黑暗交給相乘層；路燈照到的地方在相乘層「挖亮」，就能看到被照亮的路面與牆面
+  const nightK = Math.max(0, Math.min(1, (-2 - alt) / 8));
+  if (nightK > 0) {
+    br += (.95 - br) * nightK; ct += (1.05 - ct) * nightK; sat += (.75 - sat) * nightK;
+    const u = nearbyLamps().urban ?? .5;
+    const nightBase = [0, 1, 2].map(i => Math.round([16, 20, 34][i] + ([34, 42, 72][i] - [16, 20, 34][i]) * u));   // 山區更暗、市區有天空光害
+    // 月光：滿月高掛時整體泛起冷色微光，山區最明顯
+    const ml = moonLight().k, moonBase = [70, 82, 118];
+    for (let i = 0; i < 3; i++) nightBase[i] = Math.round(nightBase[i] + Math.max(0, moonBase[i] - nightBase[i]) * ml * .75);
+    base = base.map((c, i) => Math.round(c + (nightBase[i] - c) * nightK));
+  }
+  // 順光／逆光的整體差異：face＝1 正對太陽（逆光）、-1 背對太陽（順光）。
+  // 太陽高時差異只減半、不會消失；雲遮住太陽就沒有差異
+  const relSun = norm180(s.azimuth - v.heading), face = Math.cos(relSun * rad);
+  // 方向感強度：只有真正陰天（直射光 < 20%）才拿掉；局部多雲時太陽隨時會露臉，至少保留 75%
+  const dEff = wx.direct < .2 ? wx.direct : Math.max(wx.direct, .75);
+  const dirStr = alt > 0 ? dEff * Math.min(1, alt / 4) * (.6 + .4 * (1 - Math.min(alt, 70) / 70)) : 0;
+  // 建築遮擋：主體（正前方立面）在別棟大樓的影子裡，就沒有順光的鮮豔感
+  const sh = !ENABLE_3D && alt > 0 ? shadeState() : null;
+  const subjShade = !!(sh && (sh.facade ? sh.facade.toward && !sh.facade.lit : sh.camShaded));
+  const backK = Math.max(0, face) * dirStr, frontK = subjShade ? 0 : Math.max(0, -face) * dirStr;
+  // 順光：飽和、反差、亮度都拉高；逆光：整體變暗、變灰、反差降低（被眩光沖淡）
+  sat *= 1 + .3 * frontK - .3 * backK;
+  ct *= 1 + .15 * frontK - .05 * backK;
+  br *= 1 + .08 * frontK - .08 * backK;
+  panoEl.style.filter = `brightness(${br.toFixed(3)}) contrast(${ct.toFixed(3)}) saturate(${sat.toFixed(3)}) sepia(${warm.toFixed(3)})`;
+  setRain(wx.rain, alt < -4);
+
+  // 相乘層：整體色溫／夜色
+  sctx.fillStyle = `rgb(${base.join(',')})`;
+  sctx.fillRect(0, 0, W, H);
+  drawSkyAndFog(W, H, v, wx, day);
+  drawMoon(W, H, v, wx, alt);
+  // 天黑後（太陽低於 -2°）路燈逐漸亮起，-10° 全亮
+  drawLamps(W, H, v, lampLevel(), wx, base);
+  if (alt <= -0.833) return;
+  // 鏡頭和主體都在建築陰影中：沒有直射光，整體壓暗偏冷、不畫眩光
+  if ((ENABLE_3D && sunlitNow() === false) || (sh && sh.camShaded && subjShade)) {
+    sctx.fillStyle = `rgb(${Math.round(255 - 70 * wx.direct)},${Math.round(255 - 60 * wx.direct)},${Math.round(255 - 40 * wx.direct)})`;
+    sctx.fillRect(0, 0, W, H);
+    return;
+  }
+  // 只有主體在陰影（例如對面大樓擋住）：畫面中下段壓暗偏冷，天空不變
+  if (subjShade) {
+    const hz0 = project(v.heading, 0, v, W, H), y0 = hz0 ? Math.max(0, Math.min(H, hz0.y)) : H / 2;
+    const g = sctx.createLinearGradient(0, Math.max(0, y0 - H * .5), 0, H);
+    g.addColorStop(0, 'rgb(255,255,255)');
+    g.addColorStop(.35, `rgb(${Math.round(255 - 75 * wx.direct)},${Math.round(255 - 62 * wx.direct)},${Math.round(255 - 40 * wx.direct)})`);
+    g.addColorStop(1, `rgb(${Math.round(255 - 85 * wx.direct)},${Math.round(255 - 70 * wx.direct)},${Math.round(255 - 45 * wx.direct)})`);
+    sctx.fillStyle = g; sctx.fillRect(0, 0, W, H);
+  }
+  const noGlare = !!(sh && sh.camShaded);   // 太陽被鏡頭這邊的建築擋住，就不會有眩光
+
+  const rel = norm180(s.azimuth - v.heading), ar = Math.abs(rel);
+  const low = Math.max(0, 1 - alt / 40) * dEff;   // 太陽越低方向感越強；雲遮住太陽就沒有方向感
+  // 太陽在畫面上的水平位置（畫面外就夾在邊緣外）
+  const fp = (W / 2) / Math.tan(fovOf(v.zoom) / 2 * rad);
+  const sx = ar < 85 ? W / 2 + fp * Math.tan(rel * rad) : (rel < 0 ? -W : 2 * W);
+  const clampX = Math.max(-W, Math.min(2 * W, sx));
+
+  // 側光：遠離太陽那一側壓暗
+  if (ar > 20 && ar < 160) {
+    const g = sctx.createLinearGradient(clampX < W / 2 ? 0 : W, 0, clampX < W / 2 ? W : 0, 0);
+    g.addColorStop(0, 'rgb(255,255,255)');
+    const d = Math.round(255 - 60 * low * Math.sin(ar * rad));
+    g.addColorStop(1, `rgb(${d},${d},${Math.min(255, d + 12)})`);
+    sctx.fillStyle = g; sctx.fillRect(0, 0, W, H);
+  }
+  // 逆光：建築與前景背光變暗成半剪影（地平線以下最暗），天空維持明亮
+  const back = Math.max(Math.max(0, 1 - ar / 70) * Math.max(0, 1 - alt / 45) * dEff, backK);
+  if (back > 0) {
+    // 真實逆光＝亮天空、暗主體：天空不壓暗；從建築頂部（約地平線上方）往下迅速變暗，背光面帶天空反射的藍
+    const hz = project(v.heading, 0, v, W, H), hy = hz ? Math.max(0, Math.min(H, hz.y)) : H * .5;
+    const top = Math.max(0, hy - H * .32), g = sctx.createLinearGradient(0, top, 0, H);
+    const dk = (k, blue) => `rgb(${Math.round(255 - k * back)},${Math.round(255 - (k - 8) * back)},${Math.round(255 - (k - blue) * back)})`;
+    g.addColorStop(0, 'rgb(255,255,255)');
+    g.addColorStop(.18, dk(150, 40));
+    g.addColorStop(.5, dk(185, 45));
+    g.addColorStop(1, dk(200, 45));
+    sctx.fillStyle = g; sctx.fillRect(0, 0, W, H);
+  }
+  // 順光：被照亮的立面帶一點暖色
+  if (frontK > .05) {
+    sctx.fillStyle = `rgb(255,${Math.round(255 - 10 * frontK)},${Math.round(255 - 28 * frontK)})`;
+    sctx.fillRect(0, 0, W, H);
+  }
+
+  // 濾色層：太陽附近的眩光與整體霧化
+  const pt = project(s.azimuth, alt, v, W, H);
+  if (back > 0) {
+    // 逆光的眩光霧：整片泛白，越靠近太陽那側越濃
+    // 天空：太陽那一側接近過曝；主體只蓋一層很薄的眩光霧（不再整片沖灰）
+    const hz2 = project(v.heading, 0, v, W, H), hy2 = hz2 ? Math.max(0, Math.min(H, hz2.y)) : H * .5;
+    const sky = gctx.createLinearGradient(0, 0, 0, Math.max(1, hy2 - H * .12));
+    sky.addColorStop(0, `rgba(255,248,235,${(.5 * back).toFixed(3)})`);
+    sky.addColorStop(1, 'rgba(255,248,235,0)');
+    gctx.fillStyle = sky; gctx.fillRect(0, 0, W, H);
+    gctx.fillStyle = `rgba(255,${Math.round(225 + 20 * Math.min(1, alt / 45))},200,${(0.1 * back).toFixed(3)})`;
+    gctx.fillRect(0, 0, W, H);
+    const sideX = Math.max(-W * .5, Math.min(W * 1.5, clampX));
+    const vg = gctx.createRadialGradient(sideX, 0, 0, sideX, 0, Math.max(W, H) * 1.1);
+    vg.addColorStop(0, `rgba(255,244,225,${(0.5 * back).toFixed(3)})`);
+    vg.addColorStop(1, 'rgba(255,240,215,0)');
+    gctx.fillStyle = vg; gctx.fillRect(0, 0, W, H);
+  }
+  // 太陽在畫面外但在前方或側前方：太陽那一側的畫面邊緣有強光滲入，一看就知道光從哪邊來
+  if (!noGlare && ar < 115 && dEff > .2 && (!pt || pt.x < 0 || pt.x > W)) {
+    const k = Math.min(1, (115 - ar) / 50) * dEff * Math.min(1, alt / 6), leftSide = rel < 0;
+    const eg = gctx.createLinearGradient(leftSide ? 0 : W, 0, leftSide ? W * .55 : W * .45, 0);
+    eg.addColorStop(0, `rgba(255,236,200,${(.7 * k).toFixed(3)})`);
+    eg.addColorStop(.35, `rgba(255,236,200,${(.25 * k).toFixed(3)})`);
+    eg.addColorStop(1, 'rgba(255,236,200,0)');
+    gctx.fillStyle = eg; gctx.fillRect(0, 0, W, H);
+  }
+  if (pt && dEff > .05 && !noGlare) {
+    gctx.globalAlpha = Math.min(1, dEff * 1.2);
+    const R = Math.max(W, H) * (0.35 + 0.35 * low);
+    const g = gctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, R);
+    const warmG = Math.round(170 + 70 * (1 - low));
+    g.addColorStop(0, `rgba(255,${warmG + 15},${Math.round(warmG * .8)},${(0.85 * Math.max(back, .35)).toFixed(3)})`);
+    g.addColorStop(.12, `rgba(255,${warmG},${Math.round(warmG * .6)},${(0.45 * Math.max(back, .25)).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    gctx.fillStyle = g; gctx.fillRect(0, 0, W, H);
+    // 鏡頭耀斑：從太陽穿過畫面中心的光斑
+    if (pt.x > 0 && pt.x < W && pt.y > 0 && pt.y < H) {
+      const dx = W / 2 - pt.x, dy = H / 2 - pt.y;
+      [[0.6, 18, .18], [1.1, 34, .12], [1.5, 12, .2], [1.9, 60, .07]].forEach(([k, r, a]) => {
+        const fx = pt.x + dx * k, fy = pt.y + dy * k;
+        const fg = gctx.createRadialGradient(fx, fy, 0, fx, fy, r);
+        fg.addColorStop(0, `rgba(255,220,170,${a})`); fg.addColorStop(1, 'rgba(255,200,150,0)');
+        gctx.fillStyle = fg; gctx.beginPath(); gctx.arc(fx, fy, r, 0, 7); gctx.fill();
+      });
+    }
+    gctx.globalAlpha = 1;
+  } else if (ar > 85 && dEff > .3) {
+    // 太陽在身後（順光）：整體提亮一點
+    gctx.fillStyle = `rgba(255,245,225,${(0.06 * (1 - alt / 90)).toFixed(3)})`;
+    gctx.fillRect(0, 0, W, H);
+  }
+}
+// 天空中的月亮：依月相畫出亮面，雲多就看不到
+function drawMoon(W, H, v, wx, sunAlt) {
+  const m = moonAt();
+  if (m.altitude < -1 || wx.cover > .8 || sunAlt > 10) return;
+  const pt = project(m.azimuth, m.altitude, v, W, H);
+  if (!pt) return;
+  const fp = (W / 2) / Math.tan(fovOf(v.zoom) / 2 * rad);
+  const r = Math.max(5, fp * Math.tan(.26 * rad) * 1.6), vis = (1 - wx.cover) * Math.min(1, (10 - sunAlt) / 12);
+  const g = gctx.createRadialGradient(pt.x, pt.y, r, pt.x, pt.y, r * 7);
+  g.addColorStop(0, `rgba(200,215,240,${(.25 * m.fraction * vis).toFixed(3)})`); g.addColorStop(1, 'rgba(200,215,240,0)');
+  gctx.fillStyle = g; gctx.beginPath(); gctx.arc(pt.x, pt.y, r * 7, 0, 7); gctx.fill();
+  // 亮面＝亮側半圓＋明暗交界的半橢圓（眉月往亮側凹、凸月往暗側凸）。北半球盈月亮在右、虧月亮在左
+  const side = m.phase < .5 ? 1 : -1, f = m.fraction, rx = r * Math.abs(1 - 2 * f);
+  gctx.fillStyle = `rgba(240,242,235,${(.95 * vis).toFixed(3)})`;
+  gctx.beginPath();
+  gctx.arc(pt.x, pt.y, r, -Math.PI / 2, Math.PI / 2, side < 0);
+  gctx.ellipse(pt.x, pt.y, Math.max(.01, rx), r, 0, Math.PI / 2, -Math.PI / 2, (side > 0) === (f < .5));
+  gctx.fill();
+}
+// 陰天天空變灰白、起霧時地平線附近一片霧白（濾色層，越接近地平線越濃）
+function drawSkyAndFog(W, H, v, wx, day) {
+  const hz = project(v.heading, 0, v, W, H);
+  const hy = hz ? hz.y : H / 2;
+  // 照片原本是晴天拍的、有硬影子；陰天時用濾色把暗部提亮，影子變淡、反差變柔
+  const lift = Math.max(0, wx.cover - .3) * .2 * day;
+  if (lift > .01) { gctx.fillStyle = `rgba(150,156,165,${lift.toFixed(3)})`; gctx.fillRect(0, 0, W, H); }
+  const skyA = (.28 * wx.cover + .1 * wx.rain) * day;
+  if (skyA > .01 && hy > 0) {
+    const g = gctx.createLinearGradient(0, 0, 0, Math.min(H, hy + H * .05));
+    g.addColorStop(0, `rgba(205,210,218,${skyA.toFixed(3)})`);
+    g.addColorStop(.75, `rgba(205,210,218,${(skyA * .7).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(205,210,218,0)');
+    gctx.fillStyle = g; gctx.fillRect(0, 0, W, H);
+  }
+  if (wx.fog > .01) {
+    const c = day > .3 ? '214,218,224' : '120,128,145', a = wx.fog * (day > .3 ? .62 : .4);
+    const g = gctx.createLinearGradient(0, hy - H * .45, 0, hy + H * .55);
+    g.addColorStop(0, `rgba(${c},${(a * .45).toFixed(3)})`);
+    g.addColorStop(.45, `rgba(${c},${a.toFixed(3)})`);
+    g.addColorStop(1, `rgba(${c},${(a * .3).toFixed(3)})`);
+    gctx.fillStyle = g; gctx.fillRect(0, 0, W, H);
+  }
+}
+function lightSummary(alt, minutes) {
+  const ph = lightPhase(alt, minutes), lux = luxAt(alt);
+  return { ...ph, lux, text: `${ph.name} · 光線${ph.level}（晴天約 ${fmtLux(lux)} lux，EV ${evOf(lux).toFixed(1)}）` };
+}
+
+// 某方向整天適合拍攝的時段
+function goodRanges(heading, at = state.focus) {
+  const good = []; let start = null;
+  for (let m = 0; m <= 1440; m += 5) {
+    const k = m < 1440 ? classify(sunAt(m, at), heading).key : 'night';
+    const ok = k === 'front' || k === 'side';
+    if (ok && start === null) start = m;
+    if (!ok && start !== null) { if (m - start >= 15) good.push([start, m]); start = null; }
+  }
+  return good;
+}
+// 把時段依天氣切開：sunny＝預報陽光露臉（直射光 ≥ 35%）
+function splitByWeather(ranges, at = state.focus) {
+  const out = [];
+  for (const [a, b] of ranges) {
+    let s0 = a, cur = null;
+    for (let m = a; m <= b; m += 5) {
+      const sunny = m < b ? wxFactors(wxAt(m, at)).direct >= .35 : null;
+      if (cur === null) cur = sunny;
+      if (m === b || sunny !== cur) { if (m - s0 >= 10) out.push({ a: s0, b: m, sunny: cur }); s0 = m; cur = sunny; }
+    }
+  }
+  return out;
+}
+/* ---------- 規劃：任意日期、地點、鏡頭方向 ---------- */
+// 暫時切換日期／地點／方向來計算（同步執行完就換回來，畫面不受影響）
+function withCtx(ctx, fn) {
+  const keep = { date: state.date, focus: state.focus, heading: state.heading };
+  Object.assign(state, ctx);
+  try { return fn(); } finally { Object.assign(state, keep); }
+}
+const addDays = (d, n) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
+const WEEK = '日一二三四五六';
+const fmtDay = d => { const t = new Date(Date.parse(d)); return `${t.getUTCMonth() + 1}/${t.getUTCDate()}（${WEEK[t.getUTCDay()]}）`; };
+// 某一天、某個機位的拍攝計畫：晴朗又順光（扣掉建築陰影）的時段、降雨機率、金光雲量、資料狀態
+function dayPlan(at, heading, date) {
+  ensureWeather(at, date);
+  return withCtx({ date, focus: at, heading }, () => {
+    const good = goodRanges(heading, at);
+    const segs = splitByWeather(good, at).flatMap(x => x.sunny ? splitByShade(x) : [x]);
+    const sunny = segs.filter(x => x.sunny);
+    const ws = goldenWindows(at), ge = ws.find(w => w.name === '傍晚金光');
+    let pop = null, rainMm = 0;
+    for (let m = 360; m <= 1140; m += 60) { const w = wxAt(m, at); if (w.pop != null) pop = Math.max(pop ?? 0, w.pop); rainMm += w.precip || 0; }
+    const w0 = wxAt(720, at);
+    return { date, good, sunny, pop, rainMm, src: w0.src, sunset: ge ? cloudAt(ge, at) : null, minutes: sunny.reduce((n, x) => n + x.b - x.a, 0) };
+  });
+}
+
+// 晴朗時段再依「主體有沒有被建築擋住」切開
+function splitByShade(seg) {
+  const out = []; let s0 = seg.a, cur = null;
+  for (let m = seg.a; m <= seg.b; m += 5) {
+    const lit = m < seg.b ? !subjectShaded(m) : null;
+    if (cur === null) cur = lit;
+    if (m === seg.b || lit !== cur) { if (m - s0 >= 10) out.push({ a: s0, b: m, sunny: cur, shade: !cur }); s0 = m; cur = lit; }
+  }
+  return out;
+}
+const goodWindows = (heading, at) => goodRanges(heading, at).map(([a, b]) => `${fmtMin(a)}–${fmtMin(b)}`);
+
+const infoRow = (ic, main, k) => `<div class="info-row">${icon(ic)}<div><div>${main}</div>${k ? `<div class="k">${k}</div>` : ''}</div></div>`;
+/* ---- 日照資訊：只留攝影規劃用得到的 ---- */
+const msMin = ms => Math.round(((ms / 60000 + TZ * 60) % 1440 + 1440) % 1440);
+// 可點的時間：點一下時間軸就跳過去
+const tjump = (a, b) => `<button class="tjump" data-m="${Math.round(a)}">${fmtMin(a)}${b != null ? '–' + fmtMin(b) : ''}</button>`;
+const fmtDur = m => m >= 60 ? `${Math.floor(m / 60)} 小時${m % 60 ? ` ${Math.round(m % 60)} 分` : ''}` : `${Math.round(m)} 分鐘`;
+function goldenWindows(at) {
+  const t = timesAt(at);
+  return [
+    { name: '晨間藍調', a: msMin(t.dawn), b: msMin(t.blueEnd) },
+    { name: '晨間金光', a: msMin(t.blueEnd), b: msMin(t.goldenEnd) },
+    { name: '傍晚金光', a: msMin(t.goldenStart), b: msMin(t.blueStart) },
+    { name: '傍晚藍調', a: msMin(t.blueStart), b: msMin(t.dusk) },
+  ].filter(w => !isNaN(w.a) && !isNaN(w.b));
+}
+function sunRowsHtml(at) {
+  ensureWeather(at);
+  const s = sunAt(state.minutes, at), t = timesAt(at), now = state.minutes;
+  const ls = lightSummary(s.altitude, now);
+  const up = s.altitude > -0.833;
+  // 此刻光線：用攝影的說法描述太陽高低與影子
+  const feel = !up ? '沒有直射光，光線柔和均勻'
+    : s.altitude < 6 ? '太陽貼近地平線，光線暖、影子很長'
+    : s.altitude < 20 ? '低角度斜光，立體感強、影子長'
+    : s.altitude < 50 ? '光線明亮，影子中等'
+    : '太陽很高，頂光、影子短而硬';
+  const nowRow = infoRow('contrast', `${fmtMin(now)} ${ls.name}`, up ? `太陽在${dirName(s.azimuth)}方、高度 ${s.altitude.toFixed(0)}° · ${feel}` : feel);
+  // 下一段好光
+  const ws = goldenWindows(at), cur = ws.find(w => now >= w.a && now < w.b), next = ws.find(w => w.a > now);
+  const nextRow = cur ? infoRow('sun', `正在${cur.name}`, `到 ${fmtMin(cur.b)} 結束，還有 ${fmtDur(cur.b - now)}`)
+    : next ? infoRow('sun', `下一段${next.name} ${tjump(next.a, next.b)}`, `再 ${fmtDur(next.a - now)}${cloudNote(next, at)}`)
+    : infoRow('sun', '今天的金光、藍調都已結束', '換明天的日期再看');
+  const cell = w => w ? tjump(w.a, w.b) : '—';
+  const [bm, gm, ge, be] = ['晨間藍調', '晨間金光', '傍晚金光', '傍晚藍調'].map(n => ws.find(w => w.name === n));
+  return nowRow + nextRow + `
+    <div class="divider"></div>
+    <div class="sec-title">今天的好光</div>
+    <div class="light-grid">
+      <div></div><div class="h">早上</div><div class="h">傍晚</div>
+      <div class="d"><i style="background:var(--bluehr)"></i>藍調</div><div>${cell(bm)}</div><div>${cell(be)}</div>
+      <div class="d"><i style="background:var(--golden)"></i>金光</div><div>${cell(gm)}</div><div>${cell(ge)}</div>
+      <div class="d"><i style="background:#fbbc04;border-radius:2px"></i>日出／日落</div><div>${tjump(msMin(t.sunrise))}</div><div>${tjump(msMin(t.sunset))}</div>
+      ${gm && ge && wxAt(0, at).src !== 'manual' && !/longrange|none|loading/.test(wxAt(gm.a, at).src) ? `<div class="d">金光時雲量</div><div>${cloudCell(gm, at)}</div><div>${cloudCell(ge, at)}</div>` : ''}
+    </div>`;
+}
+// 今天的月出、月落（每 5 分鐘掃一次高度變化）
+function moonTimes(at = state.focus) {
+  let rise = null, set = null, prev = moonAt(0, at).altitude;
+  for (let m = 5; m <= 1440; m += 5) {
+    const a = moonAt(m, at).altitude;
+    if (prev <= 0 && a > 0 && rise == null) rise = m;
+    if (prev > 0 && a <= 0 && set == null) set = m;
+    prev = a;
+  }
+  return { rise, set };
+}
+// 夜拍整理：藍調、路燈點燈、月亮、晚上的天氣
+function nightHtml(at) {
+  const ws = goldenWindows(at), be = ws.find(w => w.name === '傍晚藍調'), lt = lampTimes(at), mt = moonTimes(at);
+  const mo = moonAt(1260, at), ph = `${moonName(mo.phase)} ${Math.round(mo.fraction * 100)}%`;
+  let cloud = 0, rain = 0, pop = null, n = 0, src = '';
+  for (let m = 1110; m <= 1380; m += 30) { const w = wxAt(m, at); cloud += w.cloud; rain += w.precip || 0; if (w.pop != null) pop = Math.max(pop ?? 0, w.pop); n++; src = w.src; }
+  cloud = Math.round(cloud / n);
+  const wxLine = /loading/.test(src) ? '取得天氣中…' : /longrange|none/.test(src) ? '沒有預報，以晴天估計' :
+    `雲量約 ${cloud}%${pop != null ? ` · 降雨機率 ${pop}%` : rain >= .5 ? ` · 雨量 ${rain.toFixed(1)} mm` : ''}` +
+    (rain >= .5 || (pop ?? 0) >= 60 ? '（地面濕，有倒影可拍）' : cloud < 40 ? '（天空乾淨）' : '');
+  const moonLine = `${mt.rise != null ? `月出 ${tjump(mt.rise)}` : '今天不升起'} · ${mt.set != null ? `月落 ${tjump(mt.set)}` : '今天不落下'}`;
+  return `<div class="divider"></div><div class="sec-title">夜拍</div>
+    <div class="light-grid" style="grid-template-columns:96px 1fr">
+      <div class="d"><i style="background:var(--bluehr)"></i>藍調</div><div>${be ? tjump(be.a, be.b) : '—'}</div>
+      <div class="d"><i style="background:#fde293"></i>路燈點燈</div><div>${lt.on != null ? `約 ${tjump(lt.on)}` : '—'}</div>
+      <div class="d"><i style="background:#e8eaed;border:1px solid #c4c7c5"></i>月亮</div><div>${ph}<br><span class="sub">${moonLine}</span></div>
+      <div class="d"><i style="background:#9aa0a6"></i>晚上天氣</div><div>${wxLine}</div>
+    </div>`;
+}
+// 金光時段的雲量：雲太多看不到夕陽、適量的高雲最容易有火燒雲
+function cloudAt(w, at) { const x = wxAt(Math.round((w.a + w.b) / 2), at); return { c: Math.round(x.cloud), rain: x.precip >= .2, low: x.low }; }
+function cloudCell(w, at) {
+  const { c, rain, low } = cloudAt(w, at);
+  const tip = rain ? '下雨' : low > 80 ? '低雲厚，難見太陽' : c >= 30 && c <= 75 ? '有機會火燒雲' : c < 30 ? '晴朗' : '偏陰';
+  return `${c}%<span class="sub"> ${tip}</span>`;
+}
+function cloudNote(w, at) {
+  const x = wxAt(Math.round((w.a + w.b) / 2), at);
+  return /longrange|none|loading|manual/.test(x.src) ? '' : ` · 雲量 ${Math.round(x.cloud)}%`;
+}
+// 依「要拍的那一面建築朝哪裡」列出太陽照在立面上的時段（順光＋側光）
+function directionsHtml(at) {
+  const rows = [0, 45, 90, 135, 180, 225, 270, 315].map(f => {
+    const all = goodRanges((f + 180) % 360, at), segs = splitByWeather(all, at), sunny = segs.filter(x => x.sunny);
+    // 短於 20 分鐘的空檔合併，避免被雲量小變化切得太碎
+    const merged = [];
+    for (const x of sunny) { const p = merged[merged.length - 1]; if (p && x.a - p.b <= 20) p.b = x.b; else merged.push({ ...x }); }
+    const cell = !all.length ? '<span class="sub">今天照不到</span>'
+      : merged.length ? merged.map(x => tjump(x.a, x.b)).join('') + (sunny.length < segs.length ? '<span class="sub">其餘多雲</span>' : '')
+      : `<span class="cloudy">${all.map(([a, b]) => tjump(a, b)).join('')}</span><span class="sub">預報多雲</span>`;
+    return `<div class="d">${dirName(f)}面</div><div>${cell}</div>`;
+  }).join('');
+  return `<div class="sec-title">建築立面的受光時段</div>
+    <div class="sub" style="padding:0 24px 8px">要拍的建築正面朝哪個方向，就看那一列；時段內太陽照在立面上，不會逆光。只列預報晴朗的時段。</div>
+    <div class="dir-grid">${rows}</div>
+    <div class="sub" style="padding:4px 24px 16px">點時間可以直接跳到那個時刻。</div>`;
+}
+
+function updateInfo() {
+  const s = sunAt(state.minutes);
+  $('timeLabel').textContent = fmtMin(state.minutes);
+  $('slider').value = state.minutes;
+  $('date').value = state.date;
+  const t = timesAt();
+  $('sunLine').textContent = `日出 ${fmtMs(t.sunrise)} · 日落 ${fmtMs(t.sunset)}`;
+
+  if (state.sv) {
+    // 攝影用的精簡資訊：① 這個角度現在是什麼光 ② 太陽在畫面哪一側 ③ 這個角度什麼時候好拍
+    const ls = lightSummary(s.altitude, state.minutes), now = state.minutes;
+    const si = shadeInfoText();
+    $('shadeInfo').textContent = si.text;
+    $('shadeInfo').className = si.cls;
+    if (!ENABLE_3D && s.altitude < 8) {
+      // 黃昏起顯示路燈狀態與今天的點燈時間
+      const nl = nearbyLamps(), lt = lampTimes(), on = lampLevel() > 0;
+      const when = now >= 720 ? (lt.on != null ? `今天約 ${fmtMin(lt.on)} 點燈` : '') : (lt.off != null ? `約 ${fmtMin(lt.off)} 熄燈` : '');
+      const src = { loading: '載入路燈資料中', tpe: `附近 ${nl.lamps.length} 盞・臺北市路燈資料`, osm: `附近 ${nl.lamps.length} 盞・OpenStreetMap`,
+        none: '附近沒有路燈', rural: '山區／郊區，推估沒有路燈', guess: `依道路推估・${nl.urban >= .5 ? '市區' : '郊區'}` }[nl.src];
+      $('shadeInfo').textContent = `路燈${on ? '已亮' : '未亮'}・${when}（${src}）`;
+      $('shadeInfo').className = 'lamp';
+    }
+    const c = classify(s, state.heading);
+    ensureWeather();
+    const w = wxAt(), wf = wxFactors(w);
+    clearTimeout(weekT); weekT = setTimeout(renderWeek, 250);
+    $('svDate').textContent = state.panoDate ? `街景拍攝於 ${fmtYM(state.panoDate)}（最新版本）` : '';
+    $('wxInfo').textContent = wxText(w) + (c.key !== 'night' && wf.direct >= .2 && wf.direct < .6 ? ' · 陽光時有時無' : '');
+    const manualWx = state.opts.wx && state.opts.wx !== 'auto';
+    $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
+    $('svWx').classList.toggle('on', manualWx);
+    const diffuse = c.key !== 'night' && wf.direct < .2;
+    $('badge').querySelector('.dot').style.background = diffuse ? '#9aa0a6' : c.color;
+    if (diffuse) {
+      // 雲遮住太陽：沒有明顯的順逆光，光線柔和
+      $('badgeText').textContent = wf.rain > .05 ? '散射光 · 下雨中' : '散射光 · 光線柔和';
+      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · 雲層遮住太陽，各方向都能拍`;
+    } else if (c.key === 'night') {
+      $('badgeText').textContent = '沒有直射光';
+      const mo = moonAt(now);
+      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · ` + (mo.altitude > 0
+        ? `月亮在${dirName(mo.azimuth)}方 ${mo.altitude.toFixed(0)}°（${moonName(mo.phase)} ${Math.round(mo.fraction * 100)}%）`
+        : `月亮在地平線下（${moonName(mo.phase)}）`);
+    } else {
+      const rel = norm180(s.azimuth - state.heading), ar = Math.abs(rel);
+      const where = ar < 3 ? '正前方' : ar > 177 ? '正後方' : `${rel < 0 ? '左' : '右'}${ar < 90 ? '前' : '後'}方`;
+      const st = shadeState(now), fc = st?.facade;
+      const facadeLit = fc ? fc.lit : Math.abs(norm180(s.azimuth - (state.heading + 180))) < 90;
+      const tag = fc && fc.toward && !fc.lit ? '<span style="color:#fdd663">建築在別棟的影子裡</span>'
+        : facadeLit ? '<span style="color:#81c995">建築受光</span>' : '<span style="color:#f28b82">建築背光</span>';
+      $('badgeText').innerHTML = `${c.label} · ${tag}` + (st?.camShaded && !(fc && fc.lit) ? '' : st?.camShaded ? '<span class="sub">（你站在陰影裡）</span>' : '');
+      if (fc && fc.toward && !fc.lit) $('badge').querySelector('.dot').style.background = '#80868b';
+      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · 太陽在${where}`;
+    }
+    const good = goodRanges(state.heading), segs = splitByWeather(good).flatMap(x => x.sunny ? splitByShade(x) : [x]), sunny = segs.filter(x => x.sunny);
+    const cur = sunny.find(x => now >= x.a && now < x.b);
+    const next = sunny.find(x => x.a > now);
+    const tail = !cur && next ? `<br><span class="sub">下一段晴朗順光再 ${fmtDur(next.a - now)}</span>` : '';
+    $('adviceText').innerHTML = (cur ? `現在晴朗順光，到 ${tjump(cur.b)} 結束（還有 ${fmtDur(cur.b - now)}）`
+      : !good.length ? '這個角度今天不會順光，試著轉個方向'
+      : sunny.length === segs.length ? `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}`
+      : sunny.length ? `晴朗又順光：${sunny.map(x => tjump(x.a, x.b)).join('、')}<span class="sub">（其餘時段${segs.some(x => x.shade) ? '被建築擋住或' : ''}預報多雲）</span>`
+      : `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（但預報多雲，光線偏柔）</span>`) + tail;
+  }
+  if (C3D.visible && C3D.viewer) {
+    const ls = lightSummary(s.altitude, state.minutes);
+    $('c3dInfo').textContent = `${fmtMin(state.minutes)} ${ls.name} · 光線${ls.level} · 太陽${dirName(s.azimuth)}方 高 ${s.altitude.toFixed(0)}°`;
+  }
+  if (!state.sv && document.body.classList.contains('side-open')) {
+    if (state.view === 'list') renderTrip();
+    if (state.view === 'place') updatePlaceSun();
+    if (state.view === 'sun') renderSunView();
+  }
+}
+
+let raf = 0, bandTimer = 0, hashTimer = 0;
+function render({ bandsToo = false } = {}) {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    // 各自獨立執行，一個出錯不會讓其他畫面停止更新
+    for (const fn of [drawLight, drawOverlay, drawCompass, updateInfo, updateMapSun, syncCesiumTime]) {
+      try { fn(); } catch (err) { console.error(err); }
+    }
+  });
+  clearTimeout(bandTimer);
+  bandTimer = setTimeout(drawBands, bandsToo ? 0 : 120);
+  clearTimeout(hashTimer);
+  hashTimer = setTimeout(writeHash, 400);
+}
+function writeHash() {
+  const c = state.sv ? state.focus : state.mapCenter;
+  const p = new URLSearchParams({ lat: c.lat.toFixed(6), lng: c.lng.toFixed(6), z: state.mapZoom, d: state.date, t: state.minutes });
+  if (state.sv) { p.set('sv', '1'); p.set('h', state.heading.toFixed(1)); p.set('p', state.pitch.toFixed(1)); p.set('f', state.zoom.toFixed(2)); }
+  history.replaceState(null, '', '#' + p.toString());
+}
+
+/* ---------- 時間控制 ---------- */
+function setMinutes(m) { state.minutes = ((Math.round(m) % 1440) + 1440) % 1440; setLive(false); render(); }
+// 即時模式：按「現在」後時間跟著真實時鐘走（到現場用），手動調時間就退出
+function setLive(on) { state.live = on; $('now')?.classList.toggle('on', on); }
+setInterval(() => {
+  if (!state.live) return;
+  const now = new Date(Date.now() + TZ * 3600e3);
+  state.date = now.toISOString().slice(0, 10);
+  state.minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  render({ bandsToo: true });
+}, 30000);
+$('slider').addEventListener('input', e => setMinutes(+e.target.value));
+
+/* ---- 時間軸：精細拖曳 ---- */
+// 往上或往下拉離時間軸越遠，拖曳越慢（跟 iPhone 影片拖曳一樣）；按住 Shift 也是精細模式
+const scrub = { on: false, val: 0, lastX: 0, timer: 0 };
+function scrubFactor(e) {
+  if (e.shiftKey) return 0.1;
+  const r = $('slider').getBoundingClientRect();
+  const dy = Math.max(0, Math.abs(e.clientY - (r.top + r.height / 2)) - r.height / 2);
+  return dy < 30 ? 1 : dy < 80 ? 0.5 : dy < 140 ? 0.25 : 0.1;
+}
+function showTip(factor) {
+  const tip = $('scrubTip'), W = $('slider').clientWidth;
+  tip.innerHTML = fmtMin(state.minutes) + (factor < 1 ? `<span class="f">精細 ×${factor === 0.1 ? '1/10' : '1/' + Math.round(1 / factor)}</span>` : '');
+  tip.style.left = (9 + state.minutes / 1439 * (W - 18)) + 'px';
+  tip.classList.add('show');
+  clearTimeout(scrub.timer);
+  if (!scrub.on) scrub.timer = setTimeout(() => tip.classList.remove('show'), 900);
+}
+const minPerPx = () => 1439 / Math.max(1, $('slider').clientWidth - 18);
+$('timebar').querySelector('.slider-wrap').addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const sl = $('slider'), r = sl.getBoundingClientRect();
+  const thumbX = r.left + 9 + state.minutes / 1439 * (r.width - 18);
+  // 點在圓點上就直接抓住、不跳動；點在其他地方就跳到那個時間
+  scrub.val = Math.abs(e.clientX - thumbX) <= 14 ? state.minutes : (e.clientX - r.left - 9) * minPerPx();
+  scrub.val = Math.max(0, Math.min(1439, scrub.val));
+  scrub.lastX = e.clientX; scrub.on = true;
+  e.currentTarget.setPointerCapture(e.pointerId);
+  sl.focus({ preventScroll: true });
+  setMinutes(scrub.val); showTip(1);
+});
+$('timebar').querySelector('.slider-wrap').addEventListener('pointermove', e => {
+  if (!scrub.on) return;
+  const f = scrubFactor(e);
+  scrub.val = Math.max(0, Math.min(1439, scrub.val + (e.clientX - scrub.lastX) * minPerPx() * f));
+  scrub.lastX = e.clientX;
+  setMinutes(scrub.val); showTip(f);
+});
+for (const ev of ['pointerup', 'pointercancel']) $('timebar').querySelector('.slider-wrap').addEventListener(ev, () => { if (scrub.on) { scrub.on = false; showTip(1); } });
+// 觸控板左右滑或滾輪：一格 1 分鐘，Shift 10 分鐘
+let wheelAcc = 0;
+$('timebar').querySelector('.slider-wrap').addEventListener('wheel', e => {
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  if (e.deltaMode === 1 || Math.abs(d) >= 50) wheelAcc = Math.sign(d);   // 一般滑鼠滾輪：一格一分鐘
+  else wheelAcc += d / 6;                                                 // 觸控板：連續滑動
+  const steps = Math.trunc(wheelAcc);
+  if (!steps) return;
+  wheelAcc -= steps;
+  setMinutes(state.minutes + steps * (e.shiftKey ? 10 : 1)); showTip(1);
+}, { passive: false });
+// 方向鍵：←→ 1 分鐘，Shift+←→ 10 分鐘（點過時間軸後有效）
+$('slider').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const dir = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 1;
+  setMinutes(state.minutes + dir * (e.shiftKey ? 10 : 1)); showTip(1);
+});
+
+/* ---- 直接輸入時間 ---- */
+// 接受 14:30、1430、930、14.30、14點30、下午2:30、2:30pm
+function parseTime(str) {
+  let t = str.trim().toLowerCase().replace(/[：．。]/g, ':').replace(/\s+/g, '');
+  const pm = /下午|晚上|傍晚|pm|p$/.test(t), am = /上午|早上|凌晨|清晨|am|a$/.test(t), noon = /中午/.test(t);
+  t = t.replace(/下午|晚上|傍晚|上午|早上|凌晨|清晨|中午|pm|am|[ap]$/g, '').replace(/點半/, ':30').replace(/[點时時]/, ':').replace(/分$/, '').replace('.', ':');
+  let h, m;
+  let mt = t.match(/^(\d{1,2}):(\d{0,2})$/);
+  if (mt) { h = +mt[1]; m = +(mt[2] || 0); }
+  else if ((mt = t.match(/^(\d{1,4})$/))) {
+    const d = mt[1];
+    if (d.length <= 2) { h = +d; m = 0; } else { h = +d.slice(0, -2); m = +d.slice(-2); }
+  } else return null;
+  if (pm && h < 12) h += 12;
+  if (am && h === 12) h = 0;
+  if (noon && h < 11) h += 12;
+  if (h === 24 && m === 0) h = 0;
+  if (h > 23 || m > 59) return null;
+  return h * 60 + m;
+}
+function editTime() {
+  const inp = $('timeInput');
+  $('timeLabel').hidden = true; inp.hidden = false; inp.classList.remove('bad');
+  inp.value = fmtMin(state.minutes);
+  inp.focus(); inp.select();
+}
+function endEditTime(commit) {
+  const inp = $('timeInput');
+  if (inp.hidden) return;
+  if (commit) {
+    const m = parseTime(inp.value);
+    if (m == null) { inp.classList.add('bad'); toast('看不懂這個時間，可以輸入 14:30 或 1430'); inp.select(); return false; }
+    setMinutes(m);
+  }
+  inp.hidden = true; $('timeLabel').hidden = false;
+  return true;
+}
+$('timeLabel').addEventListener('click', editTime);
+$('timeLabel').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); editTime(); } });
+$('timeInput').addEventListener('keydown', e => {
+  if (imeComposing(e)) return;
+  if (e.key === 'Enter') { e.preventDefault(); endEditTime(true); }
+  if (e.key === 'Escape') { e.preventDefault(); endEditTime(false); }
+});
+$('timeInput').addEventListener('blur', () => { if (!endEditTime(true)) endEditTime(false); });
+$('date').addEventListener('change', e => { if (e.target.value) { state.date = e.target.value; render({ bandsToo: true }); scheduleShade(); } });
+$('now').addEventListener('click', () => {
+  const now = new Date(Date.now() + TZ * 3600e3);
+  state.date = now.toISOString().slice(0, 10);
+  state.minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  setLive(true);
+  render({ bandsToo: true });
+});
+let playTimer = null;
+function stopPlay() { clearInterval(playTimer); playTimer = null; $('play').innerHTML = icon('play'); }
+$('play').addEventListener('click', () => {
+  if (playTimer) return stopPlay();
+  $('play').innerHTML = icon('pause');
+  playTimer = setInterval(() => setMinutes(state.minutes + 3), 60);
+});
+document.addEventListener('keydown', e => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === '[') setMinutes(state.minutes - 10);
+  if (e.key === ']') setMinutes(state.minutes + 10);
+  if (e.key === 'Escape') $('menu').classList.remove('show');
+});
+window.addEventListener('resize', () => render({ bandsToo: true }));
+
+/* ---------- 已儲存的地點 ---------- */
+const LIST_COLORS = ['#ea4335', '#f9ab00', '#34a853', '#1a73e8', '#a142f4', '#e52592', '#12b5cb', '#5f6368'];
+const Saved = {
+  data: lsGet('sunsv.saved.v1', null) || { lists: [{ id: uid(), name: '我的收藏', color: LIST_COLORS[0], visible: true, items: [] }] },
+  save() {
+    lsSet('sunsv.saved.v1', this.data); renderSavedMarkers();
+    if (state.view === 'saved') renderSaved();
+    if (state.view === 'list') renderListDetail();
+  },
+  list(id) { return this.data.lists.find(l => l.id === id); },
+  find(itemId) { for (const l of this.data.lists) { const it = l.items.find(i => i.id === itemId); if (it) return [l, it]; } return []; },
+  addList(name) {
+    const l = { id: uid(), name, color: LIST_COLORS[this.data.lists.length % LIST_COLORS.length], visible: true, items: [] };
+    this.data.lists.push(l); return l;
+  },
+};
+
+function renderSaved() {
+  $('view-saved').innerHTML = `
+    <div class="view-head" style="padding-left:24px"><h2>已儲存</h2>
+      <button class="pill-btn" data-act="newlist">${icon('add', 18)}新增清單</button></div>
+    ${Saved.data.lists.map(l => `
+      <div class="row-btn" data-list="${l.id}" role="button" tabindex="0">
+        <span class="list-icon" style="background:${l.color}">${icon('bookmark', 20)}</span>
+        <span class="t"><div>${esc(l.name)}</div><div class="sub">${l.items.length} 個地點</div></span>
+        <button class="icon-btn" data-act="visible" title="${l.visible ? '在地圖上隱藏' : '在地圖上顯示'}">${icon(l.visible ? 'visibility' : 'visibility_off', 20)}</button>
+      </div>`).join('')}
+    <div class="divider"></div>
+    <button class="row-btn" data-act="import">${icon('upload')}<span class="t">匯入 Google 地圖收藏</span></button>
+    <button class="row-btn" data-act="export">${icon('download')}<span class="t">匯出收藏備份</span></button>`;
+}
+function renderListDetail() {
+  const l = Saved.list(state.listId);
+  if (!l) return openSide('saved');
+  $('view-list').innerHTML = `
+    <div class="view-head">
+      <button class="icon-btn" data-act="back" title="返回">${icon('arrow_back')}</button>
+      <h2>${esc(l.name)}</h2>
+      <button class="icon-btn" data-act="rename" title="重新命名">${icon('edit', 20)}</button>
+      <button class="icon-btn" data-act="dellist" title="刪除清單">${icon('delete', 20)}</button>
+    </div>
+    <div class="sub" style="padding:0 24px 8px">${l.items.length} 個地點 · 📷 = 含鏡頭方向的拍攝機位</div>
+    ${l.items.map(it => `
+      <div class="row-btn" data-item="${it.id}" role="button" tabindex="0">
+        <span class="list-icon" style="background:${l.color}">${icon(it.heading != null ? 'camera' : 'place', 20)}</span>
+        <span class="t"><div>${esc(it.name)}${it.lat == null ? ' <span style="color:var(--back)">· 未定位</span>' : ''}</div>
+          <div class="sub">${esc(it.note || it.address || (it.lat != null ? `${it.lat.toFixed(5)}, ${it.lng.toFixed(5)}` : '點一下自動查找位置'))}</div></span>
+        <button class="icon-btn del" data-act="delitem" title="移除">${icon('close', 20)}</button>
+      </div>`).join('') || '<div class="sub" style="padding:12px 24px">這個清單還是空的。在地點上按「儲存」即可加入。</div>'}
+    ${l.items.length ? `<div class="divider"></div><div id="tripPlan"></div>` : ''}`;
+  renderTrip();
+}
+// 拍攝行程：清單裡每個機位在選定那天的晴朗順光時段，依時間排成一條路線
+state.tripDay = state.tripDay || todayTW();
+let tripKey = '';
+function renderTrip(force) {
+  const box = $('tripPlan'); if (!box) return;
+  const l = Saved.list(state.listId); if (!l) return;
+  const key = [l.id, l.items.length, state.tripDay, [...WX.cache.values()].filter(v => v !== 'loading').length,
+    [...BLD.tiles.values()].filter(v => v !== 'loading').length, box.childElementCount].join();
+  if (!force && key === tripKey) return;
+  tripKey = key;
+  const today = todayTW(), days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(today, i));
+  if (!days.includes(state.tripDay)) state.tripDay = today;
+  const cams = l.items.filter(it => it.lat != null && it.heading != null), places = l.items.filter(it => it.lat != null && it.heading == null);
+  const slots = [];
+  for (const it of cams) {
+    const p = dayPlan({ lat: it.lat, lng: it.lng }, it.heading, state.tripDay);
+    if (p.src === 'loading') { slots.push({ it, loading: true, a: 9999 }); continue; }
+    if (p.sunny.length) p.sunny.forEach(x => slots.push({ it, a: x.a, b: x.b, pop: p.pop }));
+    else slots.push({ it, none: true, a: 9998, why: p.good.length ? '順光時段預報多雲或被建築擋住' : '這個方向這天不會順光' });
+  }
+  slots.sort((a, b) => a.a - b.a);
+  box.innerHTML = `
+    <div class="sec-title">拍攝行程</div>
+    <div class="trip-days">${days.map((d, i) => `<button class="chip ${d === state.tripDay ? 'on' : ''}" data-tripday="${d}">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</button>`).join('')}</div>
+    ${cams.length ? slots.map(x => `<div class="trip-row" data-item="${x.it.id}" data-tripm="${x.a < 9000 ? x.a : ''}" role="button" tabindex="0">
+        <span class="tm">${x.loading ? '…' : x.none ? '—' : `${fmtMin(x.a)}<br><span class="sub">–${fmtMin(x.b)}</span>`}</span>
+        <span class="t"><div>${esc(x.it.name)}</div><div class="sub">${x.loading ? '取得天氣中…' : x.none ? x.why : `晴朗順光${x.pop != null ? ` · 降雨 ${x.pop}%` : ''}`}</div></span>
+      </div>`).join('') : ''}
+    <div class="sub" style="padding:4px 24px 16px">${cams.length ? '依時間排序，點一列直接打開那個機位與時間。' : ''}${places.length ? `${cams.length ? '<br>' : ''}有 ${places.length} 個地點沒有鏡頭方向，無法排進行程：在街景裡對好角度後按「儲存此機位」。` : ''}</div>`;
+}
+$('side').addEventListener('click', e => {
+  const d = e.target.closest('[data-tripday]');
+  if (d) { state.tripDay = d.dataset.tripday; renderTrip(true); return; }
+  const r = e.target.closest('.trip-row');
+  if (r && r.dataset.tripm) { state.date = state.tripDay; state.minutes = +r.dataset.tripm; setLive(false); }
+}, true);
+$('side').addEventListener('click', e => {
+  const actEl = e.target.closest('[data-act]');
+  const act = actEl?.dataset.act;
+  const listEl = e.target.closest('[data-list]'), itemEl = e.target.closest('[data-item]');
+  if (act === 'newlist') { const n = prompt('新清單名稱'); if (n) { Saved.addList(n.trim()); Saved.save(); } return; }
+  if (act === 'import') return openImport();
+  if (act === 'export') return exportSaved();
+  if (act === 'visible' && listEl) { const l = Saved.list(listEl.dataset.list); l.visible = !l.visible; Saved.save(); return; }
+  if (act === 'back') return openSide('saved');
+  if (act === 'rename') { const l = Saved.list(state.listId); const n = prompt('清單名稱', l.name); if (n) { l.name = n.trim(); Saved.save(); } return; }
+  if (act === 'dellist') {
+    const l = Saved.list(state.listId);
+    if (confirm(`刪除清單「${l.name}」與其中 ${l.items.length} 個地點？`)) { Saved.data.lists = Saved.data.lists.filter(x => x !== l); Saved.save(); openSide('saved'); }
+    return;
+  }
+  if (act === 'delitem' && itemEl) { const l = Saved.list(state.listId); l.items = l.items.filter(i => i.id !== itemEl.dataset.item); Saved.save(); return; }
+  if (itemEl) return openSaved(itemEl.dataset.item);
+  if (listEl) { state.listId = listEl.dataset.list; openSide('list'); }
+});
+function exportSaved() {
+  const blob = new Blob([JSON.stringify({ app: 'sun-streetview', version: 1, ...Saved.data }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `街景日照-收藏備份-${state.date}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// 儲存對話框
+let pendingSave = null;
+function openSaveModal(item, hint = '') {
+  pendingSave = item;
+  $('saveName').value = item.name || '';
+  $('saveNote').value = item.note || '';
+  $('saveHint').textContent = hint;
+  const last = lsGet('sunsv.lastList', null);
+  $('saveList').innerHTML = Saved.data.lists.map(l => `<option value="${l.id}" ${l.id === last ? 'selected' : ''}>${esc(l.name)}</option>`).join('') +
+    '<option value="__new">＋ 新清單…</option>';
+  $('saveModal').classList.add('show');
+  $('saveName').focus();
+}
+$('saveOk').addEventListener('click', () => {
+  let listId = $('saveList').value;
+  if (listId === '__new') { const n = prompt('新清單名稱'); if (!n) return; listId = Saved.addList(n.trim()).id; }
+  const l = Saved.list(listId);
+  const item = { ...pendingSave, id: uid(), name: $('saveName').value.trim() || '未命名地點', note: $('saveNote').value.trim() };
+  l.items.unshift(item);
+  lsSet('sunsv.lastList', listId);
+  Saved.save();
+  $('saveModal').classList.remove('show');
+  if (state.selection && pendingSave.heading == null) state.selection.savedId = item.id;
+  toast(`已儲存到「${l.name}」`);
+  if (state.view === 'place') renderPlace();
+});
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('.modal').classList.remove('show')));
+
+/* ---------- 匯入 Google 收藏 ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], field = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(field); rows.push(row); row = []; field = ''; }
+    else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(x => x.trim()));
+}
+function coordsFromUrl(url) {
+  if (!url) return null;
+  const pats = [/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, /@(-?\d+\.\d+),(-?\d+\.\d+)/, /search\/(-?\d+\.\d+),\s*\+?(-?\d+\.\d+)/,
+                /[?&](?:q|query|ll)=(-?\d+\.\d+),(-?\d+\.\d+)/];
+  let s = url; try { s = decodeURIComponent(url); } catch {}
+  for (const p of pats) { const m = s.match(p); if (m) return { lat: +m[1], lng: +m[2] }; }
+  return null;
+}
+function itemsFromFile(name, text) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.csv')) {
+    const rows = parseCSV(text); if (!rows.length) return [];
+    const head = rows[0].map(h => h.trim().toLowerCase());
+    const col = (...ks) => head.findIndex(h => ks.includes(h));
+    const ti = col('title', '標題', '名稱', 'name'), ni = col('note', '附註', '備註'), ui = col('url', '網址'), ci = col('comment', '留言');
+    return rows.slice(1).map(r => {
+      // 未加引號的 search/lat,lng 網址會被逗號拆開，所以把網址欄之後的欄位接回去再找座標
+      const url = r[ui] || '', c = coordsFromUrl(url) || (ui >= 0 ? coordsFromUrl(r.slice(ui).join(',')) : null);
+      const title = (r[ti] || '').trim() || (c ? '已標記的位置' : '');
+      return { name: title, note: [r[ni], r[ci]].filter(Boolean).join(' / '), url, lat: c?.lat ?? null, lng: c?.lng ?? null };
+    }).filter(it => it.name || it.lat != null);
+  }
+  if (lower.endsWith('.kml')) {
+    const doc = new DOMParser().parseFromString(text, 'text/xml');
+    return [...doc.getElementsByTagName('Placemark')].map(p => {
+      const co = p.getElementsByTagName('coordinates')[0]?.textContent.trim().split(/\s+/)[0].split(',');
+      return { name: p.getElementsByTagName('name')[0]?.textContent.trim() || '未命名',
+               note: p.getElementsByTagName('description')[0]?.textContent.replace(/<[^>]+>/g, ' ').trim().slice(0, 200) || '',
+               lat: co ? +co[1] : null, lng: co ? +co[0] : null };
+    });
+  }
+  const json = JSON.parse(text);
+  if (json.app === 'sun-streetview') return { backup: json };
+  const feats = json.type === 'FeatureCollection' ? json.features : Array.isArray(json) ? json : [];
+  return feats.map(f => {
+    const pr = f.properties || {}, loc = pr.location || {};
+    let [lng, lat] = f.geometry?.coordinates || [];
+    const url = pr.google_maps_url || pr['Google Maps URL'] || '';
+    if (!lat && !lng) { const c = coordsFromUrl(url); lat = c?.lat; lng = c?.lng; }
+    return { name: loc.name || pr.Title || pr.name || loc.address || '未命名', address: loc.address || pr.address || '',
+             note: pr.comment || pr.Comment || '', url, lat: lat || null, lng: lng || null };
+  });
+}
+async function importFiles(files) {
+  const log = $('importLog'); log.textContent = '';
+  const toResolve = [];
+  for (const f of files) {
+    try {
+      const res = itemsFromFile(f.name, await f.text());
+      if (res.backup) {
+        for (const bl of res.backup.lists || []) {
+          const l = Saved.addList(bl.name); l.color = bl.color || l.color;
+          l.items = (bl.items || []).map(it => ({ ...it, id: uid() }));
+        }
+        log.textContent += `✓ ${f.name}：還原 ${res.backup.lists?.length || 0} 個清單\n`;
+        continue;
+      }
+      const listName = f.name.replace(/\.(csv|json|geojson|kml)$/i, '').replace(/^Saved Places$/, '已加星號的地點');
+      const l = Saved.addList(listName);
+      l.items = res.map(it => ({ ...it, id: uid() }));
+      const missing = l.items.filter(i => i.lat == null);
+      toResolve.push(...missing);
+      log.textContent += `✓ ${f.name}：${l.items.length} 個地點${missing.length ? `（${missing.length} 個需查座標）` : ''}\n`;
+    } catch (err) {
+      log.textContent += `✗ ${f.name}：無法讀取（${err.message}）\n`;
+    }
+  }
+  Saved.save();
+  openSide('saved');
+  if (toResolve.length) await resolveItems(toResolve, log);
+}
+async function resolveItems(items, log) {
+  if (!Places) { log.textContent += '⚠ 未啟用 Places API (New)，無座標的地點無法自動定位\n'; return; }
+  let ok = 0;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    log.textContent = log.textContent.replace(/查找中.*\n$/, '') + `查找中 ${i + 1}/${items.length}：${it.name}\n`;
+    try {
+      const { places } = await Places.Place.searchByText({
+        textQuery: [it.name, it.address].filter(Boolean).join(' '), fields: ['id', 'location', 'formattedAddress'],
+        maxResultCount: 1, language: 'zh-TW', region: 'tw',
+        locationBias: { north: 26.5, south: 21.8, east: 122.2, west: 118.1 },
+      });
+      if (places?.[0]) {
+        it.lat = places[0].location.lat(); it.lng = places[0].location.lng();
+        it.placeId = places[0].id; it.address ||= places[0].formattedAddress; ok++;
+      }
+    } catch (err) { console.warn(err); }
+    if (i % 10 === 9) Saved.save();
+    await sleep(120);
+  }
+  log.textContent = log.textContent.replace(/查找中.*\n$/, '') + `✓ 自動定位完成：${ok}/${items.length}\n`;
+  Saved.save();
+}
+function openImport() { $('importLog').textContent = ''; $('importModal').classList.add('show'); }
+$('drop').addEventListener('click', () => $('importFile').click());
+$('importFile').addEventListener('change', e => { importFiles([...e.target.files]); e.target.value = ''; });
+['dragenter', 'dragover'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => importFiles([...e.dataTransfer.files]));
+
+/* ---------- 側面板 ---------- */
+function openSide(view) {
+  state.view = view;
+  document.body.classList.add('side-open', 'has-view');
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
+  document.querySelectorAll('.rail-btn').forEach(b => b.classList.toggle('on', b.dataset.view === view || (view === 'list' && b.dataset.view === 'saved')));
+  ({ place: renderPlace, sun: renderSunView, saved: renderSaved, list: renderListDetail })[view]();
+  $('side').scrollTop = 0;
+  syncSideHead();
+  render({ bandsToo: true });
+}
+function closeSide() {
+  document.body.classList.remove('side-open');
+  render({ bandsToo: true });
+}
+// 捲動時：照片捲到搜尋框後面就顯示白色頂欄；沒有照片的面板一捲動就顯示
+function syncSideHead() {
+  const side = $('side'), view = side.querySelector('.view.on'), hero = view?.querySelector('.hero');
+  const y = side.scrollTop, limit = hero ? hero.offsetHeight - 72 : 0;
+  document.body.classList.toggle('head-on', y > limit);
+  document.body.classList.toggle('head-line', y > limit + 8);
+}
+$('side').addEventListener('scroll', syncSideHead, { passive: true });
+$('svTop').addEventListener('click', e => { const b = e.target.closest('.tjump'); if (b) setMinutes(+b.dataset.m); });
+// 未來 7 天：同一個機位（位置＋鏡頭方向），每天的晴朗順光時段
+let weekKey = '', weekT = 0;
+function renderWeek() {
+  const card = $('weekCard'); if (!card.classList.contains('show')) return;
+  const at = { ...state.focus }, h = state.heading, today = todayTW();
+  // 位置、方向（每 3°）、資料載入進度沒變就不重算
+  const key = [at.lat.toFixed(5), at.lng.toFixed(5), Math.round(h / 3), state.date, today,
+    [...WX.cache.values()].filter(v => v !== 'loading').length, [...BLD.tiles.values()].filter(v => v !== 'loading').length].join();
+  if (key === weekKey) return;
+  weekKey = key;
+  const rows = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(today, i), p = dayPlan(at, h, d);
+    const loading = p.src === 'loading';
+    const bar = p.sunny.map(x => `<i style="left:${(x.a - 300) / 900 * 100}%;width:${(x.b - x.a) / 900 * 100}%"></i>`).join('');   // 05:00–20:00
+    const best = loading ? '<span class="none">取得天氣中…</span>'
+      : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
+      : p.good.length ? '<span class="none">順光時段預報多雲或被擋住</span>' : '<span class="none">這個角度不會順光</span>';
+    const meta = [p.pop != null ? `降雨 ${p.pop}%` : p.rainMm >= 1 ? `雨量 ${p.rainMm.toFixed(0)} mm` : '',
+      p.sunset ? `夕陽雲量 ${p.sunset.c}%` : ''].filter(Boolean).join(' · ');
+    rows.push(`<button class="wk-row ${d === state.date ? 'on' : ''}" data-day="${d}" data-m="${p.sunny[0]?.a ?? ''}">
+      <span class="d">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</span><span>${best}</span>
+      <span class="wk-bar">${bar}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</button>`);
+  }
+  card.innerHTML = `<div class="wk-head">未來 7 天・這個機位的晴朗順光 <span class="sub">（點一天直接切過去）</span></div>` + rows.join('');
+}
+$('svWeek').addEventListener('click', () => { $('weekCard').classList.toggle('show'); $('svWeek').classList.toggle('on', $('weekCard').classList.contains('show')); renderWeek(); });
+$('weekCard').addEventListener('click', e => {
+  const r = e.target.closest('[data-day]'); if (!r) return;
+  state.date = r.dataset.day; setLive(false);
+  if (r.dataset.m) state.minutes = +r.dataset.m;
+  render({ bandsToo: true });
+});
+
+// 天氣切換：預報（自動）或手動指定，方便比較「如果陰天」的樣子
+function renderWxMenu() {
+  const cur = state.opts.wx || 'auto';
+  $('wxMenu').innerHTML = `<button data-wx="auto" class="${cur === 'auto' ? 'on' : ''}">自動（過去用實際天氣、7 天內用預報）</button><div class="sep"></div>` +
+    Object.entries(WX_PRESETS).map(([k, v]) => `<button data-wx="${k}" class="${cur === k ? 'on' : ''}">${v.name}</button>`).join('');
+}
+$('svWx').addEventListener('click', e => {
+  e.stopPropagation();
+  const m = $('wxMenu'), b = $('svWx'), top = $('svTop').getBoundingClientRect(), r = b.getBoundingClientRect();
+  renderWxMenu();
+  m.style.left = (r.left - top.left) + 'px'; m.style.top = (r.bottom - top.top + 6) + 'px';
+  m.classList.toggle('show');
+});
+$('wxMenu').addEventListener('click', e => {
+  const k = e.target.closest('[data-wx]')?.dataset.wx; if (!k) return;
+  state.opts.wx = k;
+  $('wxMenu').classList.remove('show'); render({ bandsToo: true });
+});
+document.addEventListener('click', e => { if (!e.target.closest('#wxMenu')) $('wxMenu').classList.remove('show'); });
+$('side').addEventListener('click', e => { const b = e.target.closest('.tjump'); if (b) setMinutes(+b.dataset.m); });
+$('sideToggle').addEventListener('click', () => document.body.classList.contains('side-open') ? closeSide() : openSide(state.view));
+document.querySelectorAll('.rail-btn').forEach(b => b.addEventListener('click', () => {
+  const v = b.dataset.view;
+  if (document.body.classList.contains('side-open') && (state.view === v || (v === 'saved' && state.view === 'list'))) closeSide();
+  else openSide(v);
+}));
+// 選單
+const toggleMenu = e => { e.stopPropagation(); $('menu').classList.toggle('show'); };
+$('menuBtn').addEventListener('click', toggleMenu);
+$('mMenu').addEventListener('click', toggleMenu);
+$('menuClose').addEventListener('click', () => $('menu').classList.remove('show'));
+document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('menu').classList.remove('show'); });
+$('menu').addEventListener('click', e => {
+  const m = e.target.closest('[data-menu]')?.dataset.menu;
+  if (!m) return;
+  $('menu').classList.remove('show');
+  if (m === 'saved' || m === 'sun') openSide(m);
+  if (m === 'import') openImport();
+  if (m === 'export') exportSaved();
+  if (m === 'key') { $('keyInput').value = getKey(); $('mapIdInput').value = getMapId(); $('cwaKeyInput').value = CWA.key(); $('keyModal').classList.add('show'); }
+});
+document.querySelectorAll('[data-opt]').forEach(cb => {
+  cb.checked = !!state.opts[cb.dataset.opt];
+  cb.addEventListener('change', () => { state.opts[cb.dataset.opt] = cb.checked; lsSet('sunsv.opts', state.opts); syncMarksChip(); render(); });
+});
+
+const actBtn = (id, ic, lbl, primary) => `<button class="act ${primary ? 'primary' : ''}" id="${id}"><span class="circle">${icon(ic, 20)}</span>${lbl}</button>`;
+function renderPlace() {
+  const sel = state.selection;
+  if (!sel) return renderSunView();
+  const d = sel.details;
+  if (sel.loading) {
+    $('view-place').innerHTML = `<div class="hero"></div><div class="pad"><div class="loading-line" style="width:60%;height:20px"></div><div class="loading-line" style="width:40%"></div><div class="loading-line" style="width:80%"></div></div>`;
+    return;
+  }
+  $('view-place').innerHTML = `
+    ${d?.photo ? `<div class="hero" style="background-image:url('${esc(d.photo)}')">${d.photoCredit ? `<div class="cred">${d.photoCredit}</div>` : ''}</div>` : ''}
+    <div class="pad">
+      <h1 class="ptitle">${esc(sel.name)}</h1>
+      ${d?.rating ? `<div class="rating">${d.rating.toFixed(1)} <span class="stars">${starsHtml(d.rating)}</span> <span>(${d.ratingCount.toLocaleString()})</span></div>` : ''}
+      ${d?.type ? `<div class="ptype">${esc(d.type)}</div>` : ''}
+      ${!d ? `<div class="sub">${esc(sel.address || `${sel.lat.toFixed(6)}, ${sel.lng.toFixed(6)}`)}</div>` : ''}
+      ${sel.note ? `<div style="margin-top:6px">${esc(sel.note)}</div>` : ''}
+    </div>
+    <div class="actions">
+      ${actBtn('pcStreet', 'streetview', '街景', true)}
+      ${actBtn('pc3d', 'cube', '3D 陰影')}
+      ${actBtn('pcSave', sel.savedId ? 'bookmark' : 'bookmark_border', sel.savedId ? '已儲存' : '儲存')}
+      ${actBtn('pcShare', 'share', '複製連結')}
+      ${actBtn('pcG', 'open', 'Google 地圖')}
+    </div>
+    <div class="divider"></div>
+    ${d ? placeRowsHtml(sel) + '<div class="divider"></div>' : ''}
+    <div id="pcSun"></div>`;
+  updatePlaceSun();
+  $('pcStreet').onclick = () => enterStreetView(sel);
+  $('pc3d').onclick = enter3D;
+  $('pcSave').onclick = () => openSaveModal({ name: sel.name, address: sel.address, lat: sel.lat, lng: sel.lng, placeId: sel.placeId });
+  $('pcShare').onclick = () => { writeHash(); navigator.clipboard?.writeText(location.href).then(() => toast('已複製連結'), () => toast('無法複製')); };
+  $('pcG').onclick = () => window.open(d?.gmaps || `https://www.google.com/maps/search/?api=1&query=${sel.lat},${sel.lng}` + (sel.placeId ? `&query_place_id=${sel.placeId}` : ''), '_blank', 'noopener');
+}
+// 時間變動時只重畫日照區塊，照片與營業時間不閃
+function updatePlaceSun() {
+  const el = $('pcSun'), sel = state.selection;
+  if (el && sel) el.innerHTML = sunRowsHtml(sel) + nightHtml(sel) + '<div class="divider"></div>' + directionsHtml(sel);
+}
+function starsHtml(r) {
+  return [1, 2, 3, 4, 5].map(i => `<span class="${r >= i - 0.25 ? '' : 'off'}">${icon('star', 14)}</span>`).join('');
+}
+function placeRowsHtml(sel) {
+  const d = sel.details;
+  let h = infoRow('place', esc(sel.address || `${sel.lat.toFixed(6)}, ${sel.lng.toFixed(6)}`));
+  if (d.hours?.length) {
+    const today = d.hours[(new Date(Date.now() + 8 * 3600e3).getUTCDay() + 6) % 7] || '';
+    const st = d.openNow == null ? '' : d.openNow ? '<span class="open-now">營業中</span> · ' : '<span class="closed-now">已打烊</span> · ';
+    h += `<div class="info-row">${icon('clock')}<details class="hours"><summary>${st}${esc(today.replace(/^[^:：]+[:：]\s*/, ''))} ▾</summary><ol>${d.hours.map(x => `<li>${esc(x)}</li>`).join('')}</ol></details></div>`;
+  }
+  if (d.website) h += infoRow('web', `<a href="${esc(d.website)}" target="_blank" rel="noopener">${esc(d.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>`);
+  if (d.phone) h += infoRow('phone', `<a href="tel:${esc(d.phone.replace(/\s/g, ''))}">${esc(d.phone)}</a>`);
+  return h;
+}
+function renderSunView() {
+  const at = state.focus;
+  $('view-sun').innerHTML = `
+    <div class="pad">
+      <h1 class="ptitle">日照</h1>
+      <div class="sub">${state.selection ? esc(state.selection.name) : '地圖中心'} · ${state.date}</div>
+    </div>
+    <div class="divider"></div>
+    ${sunRowsHtml(at)}
+    ${nightHtml(at)}
+    <div class="divider"></div>
+    ${directionsHtml(at)}`;
+}
+
+/* ---------- 3D 建築遮蔽（CesiumJS + Google 3D 圖塊） ---------- */
+// 同一個 Cesium 畫面兩用：平常藏起來，從機位朝太陽方向打射線判斷有沒有被建築擋住；按「3D 視角」時才顯示
+const CESIUM_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.121.0/Build/Cesium/';
+const C3D = {
+  viewer: null, tiles: null, loading: null, failed: false,
+  visible: false, view: 'bird',
+  key: '', job: 0, origin: null, groundH: null,
+  profile: new Map(),   // 分鐘 → true（直射）/ false（被遮住）
+  total: 0, done: 0,
+};
+function ensureCesium() {
+  if (C3D.loading) return C3D.loading;
+  window.CESIUM_BASE_URL = CESIUM_URL;
+  C3D.loading = new Promise((res, rej) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = CESIUM_URL + 'Widgets/widgets.css'; document.head.appendChild(l);
+    const s = document.createElement('script'); s.src = CESIUM_URL + 'Cesium.js';
+    s.onload = res; s.onerror = () => rej(new Error('無法載入 3D 引擎'));
+    document.head.appendChild(s);
+  }).then(initCesium).catch(err => { C3D.failed = true; console.warn(err); render(); throw err; });
+  return C3D.loading;
+}
+async function initCesium() {
+  Cesium.Ion.defaultAccessToken = '';
+  const v = new Cesium.Viewer('cesium', {
+    globe: false, baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+    navigationHelpButton: false, timeline: false, animation: false, infoBox: false, selectionIndicator: false,
+    fullscreenButton: false, shadows: true, requestRenderMode: true, maximumRenderTimeChange: Infinity,
+  });
+  v.clock.shouldAnimate = false;
+  v.resolutionScale = 0.5;
+  const sm = v.shadowMap;
+  sm.softShadows = true; sm.size = 4096; sm.maximumDistance = 1200; sm.darkness = 0.35;
+  // 加大陰影偏移，消除水面等平坦處的條紋（shadow acne）；這是 Cesium 內部參數，不存在時就略過
+  if (sm._primitiveBias) Object.assign(sm._primitiveBias, { depthBias: 0.0008, normalShadingSmooth: 0.3, normalOffsetScale: 3.0 });
+  // Google 圖塊預設不受光；自訂著色器用螢幕空間導數補法線，做出受光面／背光面
+  const lit = new Cesium.CustomShader({
+    lightingModel: Cesium.LightingModel.UNLIT,
+    fragmentShaderText: `
+      void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+        vec3 p = fsInput.attributes.positionEC;
+        vec3 n = normalize(cross(dFdx(p), dFdy(p)));
+        if (dot(n, -p) < 0.0) n = -n;
+        float ndl = max(dot(n, czm_lightDirectionEC), 0.0);
+        material.diffuse *= 0.45 + 0.75 * ndl;
+      }`,
+  });
+  C3D.tiles = await Cesium.Cesium3DTileset.fromUrl(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(getKey())}`, {
+    showCreditsOnScreen: true, shadows: Cesium.ShadowMode.ENABLED, customShader: lit,
+  });
+  v.scene.primitives.add(C3D.tiles);
+  C3D.marker = v.entities.add({ point: { pixelSize: 12, color: Cesium.Color.fromCssColorString('#ea4335'),
+    outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+  C3D.viewer = v;
+  syncCesiumTime();
+}
+function syncCesiumTime() {
+  if (!C3D.viewer) return;
+  C3D.viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(msAt(state.minutes)));
+  C3D.viewer.scene.requestRender();
+}
+async function waitTiles(timeout = 2500) {
+  const scene = C3D.viewer.scene, t0 = performance.now();
+  for (let f = 0; performance.now() - t0 < timeout || f < 3; f++) {
+    scene.requestRender();
+    await new Promise(r => requestAnimationFrame(r));
+    if (f > 1 && C3D.tiles.tilesLoaded) return true;
+  }
+  return false;
+}
+async function groundAt(at) {
+  // 省電渲染模式下畫面不會自己更新，查詢期間要持續要求重繪，圖塊才會載入
+  let done = false;
+  const p = C3D.viewer.scene.sampleHeightMostDetailed([Cesium.Cartographic.fromDegrees(at.lng, at.lat)]).finally(() => { done = true; });
+  for (let i = 0; i < 600 && !done; i++) { C3D.viewer.scene.requestRender(); await new Promise(r => requestAnimationFrame(r)); }
+  const [c] = await p;
+  return c?.height;
+}
+// 從機位朝太陽打一條射線，2.5 公尺外打到東西就算被遮住
+async function sunBlocked(origin, sun, timeout) {
+  const cam = C3D.viewer.camera;
+  cam.setView({ destination: origin, orientation: { heading: sun.azimuth * rad, pitch: sun.altitude * rad, roll: 0 } });
+  cam.frustum.fov = 30 * rad;
+  await waitTiles(timeout);
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+  const A = sun.azimuth * rad, B = sun.altitude * rad;
+  const dir = Cesium.Matrix4.multiplyByPointAsVector(enu,
+    new Cesium.Cartesian3(Math.sin(A) * Math.cos(B), Math.cos(A) * Math.cos(B), Math.sin(B)), new Cesium.Cartesian3());
+  Cesium.Cartesian3.normalize(dir, dir);
+  const hit = C3D.viewer.scene.pickFromRay(new Cesium.Ray(origin, dir), [C3D.marker]);
+  return !!(hit?.position && Cesium.Cartesian3.distance(hit.position, origin) > 2.5);
+}
+let shadeTimer = 0;
+function scheduleShade() {
+  clearTimeout(shadeTimer);
+  if (!ENABLE_3D) return;
+  // 第一次等街景先畫出來再載 3D 引擎，避免兩邊搶資源造成黑畫面
+  shadeTimer = setTimeout(() => { if (state.sv && !C3D.visible) ensureCesium().then(computeShadeProfile).catch(() => {}); }, C3D.viewer ? 600 : 3000);
+}
+async function computeShadeProfile() {
+  if (!C3D.viewer || C3D.visible || !state.sv) return;
+  const at = { ...state.focus };
+  const key = `${at.lat.toFixed(5)},${at.lng.toFixed(5)},${state.date}`;
+  if (C3D.key === key && C3D.done >= C3D.total) return;
+  if (C3D.key !== key) { C3D.key = key; C3D.profile = new Map(); C3D.origin = null; }
+  const job = ++C3D.job;
+  C3D.viewer.resolutionScale = 0.5;
+  if (!C3D.origin) {
+    const h = await groundAt(at);
+    if (job !== C3D.job) return;
+    if (h == null) { C3D.total = C3D.done = 0; C3D.origin = 'none'; render(); return; }
+    C3D.groundH = h;
+    C3D.origin = Cesium.Cartesian3.fromDegrees(at.lng, at.lat, h + 1.8);
+  }
+  if (C3D.origin === 'none') return;
+  // 日出到日落每 10 分鐘一個點，從目前時間往外算，讓眼前這個時間最先出結果
+  const mins = [];
+  for (let m = 0; m < 1440; m += 10) if (sunAt(m, at).altitude > 0.5) mins.push(m);
+  mins.sort((a, b) => Math.abs(a - state.minutes) - Math.abs(b - state.minutes));
+  C3D.total = mins.length;
+  C3D.done = mins.filter(m => C3D.profile.has(m)).length;
+  for (const m of mins) {
+    if (job !== C3D.job || C3D.visible || !state.sv) return;
+    if (C3D.profile.has(m)) continue;
+    // 前幾個點等周邊模型載入；之後模型多半已在快取，短暫等待即可
+    C3D.profile.set(m, !(await sunBlocked(C3D.origin, sunAt(m, at), C3D.done < 3 ? 2500 : 400)));
+    C3D.done = mins.filter(x => C3D.profile.has(x)).length;
+    drawSunlit(); render();
+  }
+}
+// 目前時間是否有直射陽光：true / false / null（未知）
+function sunlitNow() {
+  if (!state.sv || !C3D.profile.size) return null;
+  const m = Math.round(state.minutes / 10) * 10 % 1440;
+  if (sunAt(state.minutes).altitude <= 0.5) return null;
+  return C3D.profile.has(m) ? C3D.profile.get(m) : null;
+}
+function sunlitWindows() {
+  const out = []; let start = null;
+  for (let m = 0; m <= 1440; m += 10) {
+    const ok = C3D.profile.get(m) === true;
+    if (ok && start === null) start = m;
+    if (!ok && start !== null) { out.push(`${fmtMin(start)}–${fmtMin(m)}`); start = null; }
+  }
+  return out;
+}
+function drawSunlit() {
+  const c = $('sunlit'), [W, H] = fitCanvas(c), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!state.sv) return;
+  if (!ENABLE_3D) return;   // 天氣已經反映在時間軸的灰色（柔光）裡，不另外畫細條
+  if (false) {
+    for (let m = 0; m < 1440; m += 15) {
+      const w = wxAt(m + 7), f = wxFactors(w);
+      ctx.fillStyle = f.rain > .02 ? `rgba(66,133,244,${(.5 + f.rain * .5).toFixed(2)})` : f.fog > .5 ? 'rgba(232,234,237,.9)'
+        : `rgba(154,160,166,${(f.cover * .95).toFixed(2)})`;
+      ctx.fillRect(m / 1440 * W, 0, 15 / 1440 * W + .5, H);
+    }
+    return;
+  }
+  for (const [m, ok] of C3D.profile) {
+    ctx.fillStyle = ok ? '#fde293' : '#5f6368';
+    ctx.fillRect(m / 1440 * W, 0, 10 / 1440 * W + .5, H);
+  }
+}
+function shadeInfoText() {
+  if (!ENABLE_3D) return { text: '', cls: '' };
+  if (C3D.failed) return { text: '3D 模型無法載入，無法判斷建築遮蔽', cls: 'shaded' };
+  if (!C3D.viewer) return { text: '正在載入 3D 模型…', cls: '' };
+  if (C3D.origin === 'none') return { text: '這裡沒有 3D 模型，無法判斷建築遮蔽', cls: 'shaded' };
+  if (sunAt(state.minutes).altitude <= 0.5) return { text: '', cls: '' };
+  const now = sunlitNow();
+  const prog = C3D.done < C3D.total ? `（計算整天遮蔽 ${C3D.done}/${C3D.total}）` : '';
+  if (now === null) return { text: `正在計算建築遮蔽…${prog}`, cls: '' };
+  return now ? { text: `☀ 此刻陽光直射這個位置${prog}`, cls: '' }
+             : { text: `▣ 此刻在建築／樹的陰影中，太陽被擋住${prog}`, cls: 'shaded' };
+}
+
+// 3D 視角
+async function enter3D() {
+  C3D.visible = true; C3D.job++;
+  document.body.classList.add('c3d', 'dark');
+  $('svTitle3d').textContent = state.sv ? ($('svTitle').textContent || '3D 視角') : (state.selection?.name || '3D 視角');
+  $('c3dInfo').textContent = '載入 3D 模型中…';
+  try { await ensureCesium(); } catch { toast('3D 模型無法載入（請確認已啟用 Map Tiles API）'); exit3D(); return; }
+  if (!C3D.visible) return;
+  C3D.viewer.resolutionScale = 1;
+  C3D.viewer.scene.requestRenderMode = false;   // 顯示中持續繪製，模型載入後才會即時出現
+  C3D.viewer.camera.frustum.fov = 60 * rad;
+  const at = { ...state.focus };
+  let h = C3D.groundH;
+  if (!C3D.key.startsWith(`${at.lat.toFixed(5)},${at.lng.toFixed(5)}`)) h = await groundAt(at);
+  C3D.spot = { at, h: h ?? 10 };
+  C3D.marker.position = Cesium.Cartesian3.fromDegrees(at.lng, at.lat, C3D.spot.h + 1);
+  set3DView(state.sv ? 'eye' : 'bird');
+  render({ bandsToo: true });
+}
+function set3DView(kind) {
+  C3D.view = kind;
+  $('c3dBird').classList.toggle('on', kind === 'bird');
+  $('c3dEye').classList.toggle('on', kind === 'eye');
+  const { at, h } = C3D.spot, cam = C3D.viewer.camera;
+  if (kind === 'eye') {
+    cam.setView({ destination: Cesium.Cartesian3.fromDegrees(at.lng, at.lat, h + 1.8),
+                  orientation: { heading: state.heading * rad, pitch: Math.max(-20, Math.min(60, state.pitch)) * rad, roll: 0 } });
+  } else {
+    cam.lookAt(Cesium.Cartesian3.fromDegrees(at.lng, at.lat, h),
+               new Cesium.HeadingPitchRange(state.heading * rad, -45 * rad, 350));
+    cam.lookAtTransform(Cesium.Matrix4.IDENTITY);
+  }
+  C3D.viewer.scene.requestRender();
+}
+function exit3D() {
+  C3D.visible = false;
+  document.body.classList.remove('c3d');
+  document.body.classList.toggle('dark', state.sv);
+  if (C3D.viewer) { C3D.viewer.resolutionScale = 0.5; C3D.viewer.scene.requestRenderMode = true; }
+  render({ bandsToo: true });
+  scheduleShade();
+}
+$('c3dBack').addEventListener('click', exit3D);
+$('c3dBird').addEventListener('click', () => set3DView('bird'));
+$('c3dEye').addEventListener('click', () => set3DView('eye'));
+$('sv3d').addEventListener('click', enter3D);
+
+/* ---------- Google Maps ---------- */
+let map, pano, sv, geocoder, Places = null, Marker = null;
+
+// 自訂 HTML 標記：不需要 Map ID（Google 的測試用 Map ID 有頻率限制，重新整理幾次就會 429）
+function makeHtmlMarkerClass() {
+  return class HtmlMarker extends google.maps.OverlayView {
+    constructor({ map, position = null, content, zIndex = 1, title = '', anchor = 'bottom' }) {
+      super();
+      this.div = document.createElement('div');
+      this.div.style.cssText = `position:absolute;z-index:${zIndex};cursor:pointer;transform:translate(-50%,${anchor === 'bottom' ? '-100%' : '-50%'})`;
+      this.div.title = title;
+      if (content) this.div.appendChild(content);
+      this.div.addEventListener('click', e => { e.stopPropagation(); this.onclick?.(); });
+      this._pos = position;
+      this.setMap(map);
+    }
+    set position(p) { this._pos = p; this.draw(); }
+    get position() { return this._pos; }
+    addListener(_ev, fn) { this.onclick = fn; }
+    onAdd() { this.getPanes().overlayMouseTarget.appendChild(this.div); }
+    onRemove() { this.div.remove(); }
+    draw() {
+      const proj = this.getProjection();
+      if (!proj || !this._pos) { this.div.style.display = 'none'; return; }
+      const pt = proj.fromLatLngToDivPixel(new google.maps.LatLng(this._pos));
+      this.div.style.display = '';
+      this.div.style.left = pt.x + 'px'; this.div.style.top = pt.y + 'px';
+    }
+  };
+}
+const RED_PIN = '<svg width="27" height="43" viewBox="0 0 27 43"><path d="M13.5 0C6 0 0 6 0 13.5 0 23.6 13.5 43 13.5 43S27 23.6 27 13.5C27 6 21 0 13.5 0z" fill="#ea4335" stroke="#a52714" stroke-width="1"/><circle cx="13.5" cy="13.5" r="5" fill="#a52714"/></svg>';
+let sunRay, shadowRay, riseRay, setRay, sunPin, viewCone, selMarker;
+let savedMarkers = [];
+
+function offset(p, az, meters) {
+  return { lat: p.lat + meters * Math.cos(az * rad) / 111320, lng: p.lng + meters * Math.sin(az * rad) / (111320 * Math.cos(p.lat * rad)) };
+}
+function updateMapSun() {
+  if (!map) return;
+  const f = state.focus, s = sunAt(state.minutes), t = timesAt();
+  const b = map.getBounds();
+  const span = b ? (b.getNorthEast().lat() - b.getSouthWest().lat()) * 111320 : 1000;
+  const L = state.sv ? 120 : span * 0.32;
+  // 地圖模式的太陽方向線預設不顯示（選單可打開）；街景小地圖照常顯示
+  const up = s.altitude > -0.833 && (state.sv || state.opts.mapSun);
+  sunRay.setPath(up ? [f, offset(f, s.azimuth, L)] : []);
+  shadowRay.setPath(up ? [f, offset(f, s.azimuth + 180, L * Math.min(1, 0.35 / Math.max(0.05, Math.tan(Math.max(1, s.altitude) * rad))))] : []);
+  const rise = Sun.position(t.sunrise, f.lat, f.lng).azimuth, set = Sun.position(t.sunset, f.lat, f.lng).azimuth;
+  const lines = !state.sv && state.opts.mapSun;
+  riseRay.setPath(!lines ? [] : [f, offset(f, rise, L)]);
+  setRay.setPath(!lines ? [] : [f, offset(f, set, L)]);
+  sunPin.position = up ? offset(f, s.azimuth, L) : null;
+  if (state.sv) {
+    const fov = fovOf(state.zoom), pts = [f];
+    for (let a = -fov / 2; a <= fov / 2 + .01; a += fov / 8) pts.push(offset(f, state.heading + a, 90));
+    viewCone.setPath(pts);
+  } else viewCone.setPath([]);
+}
+
+function setSelection(sel, { pan = true, viewport = null } = {}) {
+  state.selection = sel;
+  state.focus = { lat: sel.lat, lng: sel.lng };
+  selMarker.position = { lat: sel.lat, lng: sel.lng };
+  if (pan) { if (viewport) map.fitBounds(viewport); else { map.panTo(state.focus); if (map.getZoom() < 15) map.setZoom(17); } }
+  $('search').value = sel.name === '已標記的位置' ? '' : sel.name;
+  updateSearchButtons();
+  openSide('place');
+  loadDetails(sel);
+}
+function clearSelection() {
+  state.selection = null;
+  if (selMarker) selMarker.position = null;
+  state.focus = { ...state.mapCenter };
+  $('search').value = '';
+  updateSearchButtons();
+  if (state.view === 'place') closeSide();
+  render({ bandsToo: true });
+}
+function dropPin(latLng) {
+  const sel = { name: '已標記的位置', lat: latLng.lat(), lng: latLng.lng() };
+  setSelection(sel, { pan: false });
+  geocoder?.geocode({ location: latLng, language: 'zh-TW' }, (res, status) => {
+    if (status === 'OK' && res[0] && state.selection === sel) { sel.address = res[0].formatted_address; renderPlace(); }
+  });
+}
+// 地點詳細資料（照片、評分、營業時間…），同一個地點只抓一次
+const DETAIL_FIELDS = ['id', 'displayName', 'formattedAddress', 'location', 'viewport', 'photos', 'rating', 'userRatingCount',
+  'primaryTypeDisplayName', 'regularOpeningHours', 'utcOffsetMinutes', 'nationalPhoneNumber', 'websiteURI', 'googleMapsURI'];
+const detailCache = new Map();
+async function fetchPlace(placeId) {
+  if (detailCache.has(placeId)) return detailCache.get(placeId);
+  const job = (async () => {
+    const p = new Places.Place({ id: placeId, requestedLanguage: 'zh-TW' });
+    await p.fetchFields({ fields: DETAIL_FIELDS });
+    const ph = p.photos?.[0];
+    const openNow = isOpenAt(p.regularOpeningHours?.periods, p.utcOffsetMinutes ?? 480);
+    return {
+      place: p,
+      details: {
+        photo: ph ? ph.getURI({ maxWidth: 816, maxHeight: 480 }) : null,
+        photoCredit: ph?.authorAttributions?.map(a => `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName)}</a>`).join('、') || '',
+        rating: p.rating || null, ratingCount: p.userRatingCount || 0,
+        type: p.primaryTypeDisplayName || '',
+        hours: p.regularOpeningHours?.weekdayDescriptions || null, openNow,
+        phone: p.nationalPhoneNumber || '', website: p.websiteURI || '', gmaps: p.googleMapsURI || '',
+      },
+    };
+  })();
+  detailCache.set(placeId, job);
+  job.catch(() => detailCache.delete(placeId));
+  return job;
+}
+// 依營業時段判斷現在是否營業（isOpen() 只在 beta 版提供，所以自己算）
+function isOpenAt(periods, offset) {
+  if (!periods?.length) return null;
+  if (periods.length === 1 && !periods[0].close) return true;   // 24 小時營業
+  const t = new Date(Date.now() + offset * 60000);
+  const now = t.getUTCDay() * 1440 + t.getUTCHours() * 60 + t.getUTCMinutes(), WEEK = 7 * 1440;
+  return periods.some(({ open: o, close: c }) => {
+    if (!o || !c) return false;
+    const s = o.day * 1440 + o.hour * 60 + o.minute;
+    let e = c.day * 1440 + c.hour * 60 + c.minute;
+    if (e <= s) e += WEEK;
+    return (now >= s && now < e) || (now + WEEK >= s && now + WEEK < e);
+  });
+}
+// 已選地點若有 placeId，補抓詳細資料後重畫面板
+function loadDetails(sel) {
+  if (!Places || !sel.placeId || sel.details) return;
+  fetchPlace(sel.placeId).then(({ details, place }) => {
+    sel.details = details;
+    sel.address ||= place.formattedAddress;
+    if (state.selection === sel) renderPlace();
+  }, err => console.warn('地點詳細資料失敗', err));
+}
+async function showPlaceById(placeId, fallbackLatLng) {
+  // 先開面板顯示載入中，跟 Google 地圖一樣即點即開
+  const tmp = { name: '', lat: fallbackLatLng.lat(), lng: fallbackLatLng.lng(), placeId, loading: true };
+  setSelection(tmp, { pan: false });
+  try {
+    const { place: p, details } = await fetchPlace(placeId);
+    if (state.selection !== tmp) return;
+    setSelection({ name: p.displayName, address: p.formattedAddress, lat: p.location.lat(), lng: p.location.lng(), placeId: p.id, details }, { pan: false });
+  } catch (err) { console.warn(err); if (state.selection === tmp) dropPin(fallbackLatLng); }
+}
+
+// 同一地點常有好幾個年份的街景（data.time）；一律挑最新拍攝的那一版
+function newestPano(data) {
+  let best = { pano: data.location.pano, date: null };
+  for (const t of data.time || []) {
+    const d = Object.values(t).find(v => v instanceof Date);
+    if (d && (!best.date || d > best.date)) best = { pano: t.pano, date: d };
+  }
+  if (!best.date && data.imageDate) best.date = new Date(data.imageDate + '-01');
+  return best;
+}
+const fmtYM = d => d ? `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}` : '';
+// 走動到新的街景點時也檢查：如果這個點有更新的版本，就換過去（視角不變）
+function ensureNewestPano() {
+  const id = pano.getPano(); if (!id) return;
+  sv.getPanorama({ pano: id }, (d, st) => {
+    if (st !== 'OK' || pano.getPano() !== id) return;
+    const n = newestPano(d);
+    state.panoDate = n.date || (d.imageDate ? new Date(d.imageDate + '-01') : null);
+    if (n.pano && n.pano !== id) pano.setPano(n.pano);
+    render();
+  });
+}
+function enterStreetView(at, povIn) {
+  if (povIn?.pano) {
+    pano.setPano(povIn.pano); pano.setPov({ heading: povIn.heading, pitch: povIn.pitch ?? 0 }); pano.setZoom(povIn.zoom ?? 1);
+    pano.setVisible(true); return;
+  }
+  // 只找 Google 官方拍的戶外街景（兩個條件取交集）。使用者上傳的 360° 照片常離景點最近，
+  // 但走另一個圖片伺服器，容易被限流而整片黑，畫質也不穩定
+  const SVS = google.maps.StreetViewSource;
+  const opts = { location: at, radius: 80, preference: google.maps.StreetViewPreference.NEAREST,
+    ...(SVS.GOOGLE ? { sources: [SVS.GOOGLE, SVS.OUTDOOR] } : { source: SVS.OUTDOOR }) };
+  const go = (data, status) => {
+    if (status !== 'OK') {
+      if (opts.radius < 300) { opts.radius = 300; sv.getPanorama(opts, go); return; }
+      toast('附近沒有街景，換個靠近道路的位置試試'); return;
+    }
+    pano.setPano(newestPano(data).pano);
+    if (povIn) { pano.setPov({ heading: povIn.heading, pitch: povIn.pitch ?? 0 }); pano.setZoom(povIn.zoom ?? 1); }
+    else {
+      // 預設面向目標地點
+      const loc = data.location.latLng;
+      const dy = at.lat - loc.lat(), dx = (at.lng - loc.lng()) * Math.cos(at.lat * rad);
+      if (Math.hypot(dx, dy) > 1e-5) pano.setPov({ heading: (Math.atan2(dx, dy) / rad + 360) % 360, pitch: 5 });
+    }
+    pano.setVisible(true);
+  };
+  sv.getPanorama(opts, go);
+}
+function setMode(isSv) {
+  state.sv = isSv;
+  document.body.classList.toggle('sv', isSv);
+  document.body.classList.toggle('dark', isSv || C3D.visible);
+  if (isSv) scheduleShade(); else C3D.job++;
+  $('menu').classList.remove('show');
+  if (!isSv) {
+    state.focus = state.selection ? { lat: state.selection.lat, lng: state.selection.lng } : { ...state.mapCenter };
+    if (playTimer) stopPlay();
+  }
+  // 版面變動後通知地圖與街景重新計算尺寸
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  render({ bandsToo: true });
+}
+
+function openSaved(itemId) {
+  const [, it] = Saved.find(itemId);
+  if (!it) return;
+  if (it.lat == null) {
+    if (!Places) { toast('這個地點沒有座標，需啟用 Places API (New) 才能自動定位'); return; }
+    toast(`正在查找「${it.name}」的位置…`);
+    resolveItems([it], { textContent: '' }).then(() => it.lat != null ? openSaved(itemId) : toast('找不到這個地點的位置'));
+    return;
+  }
+  if (it.heading != null) {
+    state.selection = { name: it.name, address: it.address, lat: it.lat, lng: it.lng, note: it.note, savedId: it.id };
+    selMarker.position = { lat: it.lat, lng: it.lng };
+    map.setCenter({ lat: it.lat, lng: it.lng });
+    enterStreetView({ lat: it.lat, lng: it.lng }, it);
+    return;
+  }
+  setSelection({ name: it.name, address: it.address, lat: it.lat, lng: it.lng, placeId: it.placeId, note: it.note, savedId: it.id });
+}
+
+function renderSavedMarkers() {
+  if (!map || !Marker) return;
+  savedMarkers.forEach(m => m.setMap(null));
+  savedMarkers = [];
+  for (const l of Saved.data.lists) {
+    if (!l.visible) continue;
+    for (const it of l.items) {
+      if (it.lat == null) continue;
+      const el = document.createElement('div');
+      el.className = 'saved-pin'; el.style.background = l.color;
+      el.innerHTML = icon(it.heading != null ? 'camera' : 'bookmark', 13);
+      const m = new Marker({ map, position: { lat: it.lat, lng: it.lng }, content: el, title: it.name, zIndex: 1, anchor: 'center' });
+      m.addListener('click', () => openSaved(it.id));
+      savedMarkers.push(m);
+    }
+  }
+}
+
+/* ---------- 搜尋 ---------- */
+let acToken = null, acTimer = 0, acList = [], acActive = -1;
+function parseQuery(q) {
+  const c = coordsFromUrl(q);
+  const head = q.match(/,(\d+(?:\.\d+)?)h/);
+  if (c && /google|goo\.gl|maps/.test(q)) return { ...c, heading: head ? +head[1] : null, sv: /,3a,/.test(q) };
+  const ll = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (ll) return { lat: +ll[1], lng: +ll[2] };
+  return null;
+}
+function updateSearchButtons() {
+  const has = !!$('search').value || !!state.selection;
+  $('clearSearch').style.display = has ? '' : 'none';
+}
+function hideSuggest() { $('searchBox').classList.remove('open'); acList = []; acActive = -1; }
+async function fetchSuggestions(q) {
+  if (!Places || !q.trim() || parseQuery(q)) { hideSuggest(); return; }
+  acToken ||= new Places.AutocompleteSessionToken();
+  try {
+    const { suggestions } = await Places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      input: q, sessionToken: acToken, language: 'zh-TW', region: 'tw', locationBias: map.getBounds() || undefined,
+    });
+    if ($('search').value !== q) return;
+    acList = suggestions.map(s => s.placePrediction).filter(Boolean);
+    acActive = -1;
+    $('suggest').innerHTML = acList.map((p, i) =>
+      `<li data-i="${i}">${icon('place', 20)}<div class="t"><div>${esc(p.mainText?.text || p.text.text)}</div><div class="sub">${esc(p.secondaryText?.text || '')}</div></div></li>`).join('');
+    $('searchBox').classList.toggle('open', acList.length > 0);
+  } catch (err) { console.warn('Places autocomplete 失敗', err); hideSuggest(); }
+}
+async function selectPrediction(pred) {
+  hideSuggest();
+  try {
+    const p = pred.toPlace();
+    await p.fetchFields({ fields: ['id', 'displayName', 'formattedAddress', 'location', 'viewport'] });
+    acToken = null;
+    setSelection({ name: p.displayName, address: p.formattedAddress, lat: p.location.lat(), lng: p.location.lng(), placeId: p.id }, { viewport: p.viewport });
+  } catch (err) { console.warn(err); toast('無法取得地點資料'); }
+}
+function doSearch() {
+  const q = $('search').value.trim();
+  if (!q) return;
+  if (!map) { toast('請先設定 Google Maps API 金鑰'); return; }
+  const p = parseQuery(q);
+  if (p) {
+    hideSuggest();
+    if (p.sv || p.heading != null) enterStreetView(p, p.heading != null ? { heading: p.heading, pitch: 0 } : null);
+    else setSelection({ name: '已標記的位置', lat: p.lat, lng: p.lng });
+    return;
+  }
+  if (acList.length) { selectPrediction(acList[Math.max(0, acActive)]); return; }
+  if (!geocoder) return;
+  geocoder.geocode({ address: q, region: 'tw', language: 'zh-TW' }, (res, status) => {
+    if (status === 'OK') {
+      const r = res[0];
+      setSelection({ name: q, address: r.formatted_address, lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), placeId: r.place_id }, { viewport: r.geometry.viewport });
+    } else if (status === 'REQUEST_DENIED') toast('搜尋需在 Google Cloud 啟用 Places API (New) 或 Geocoding API');
+    else toast('找不到這個地點');
+  });
+}
+// 重新整理時瀏覽器會自動還原輸入框上次的內容；跟 Google 地圖一樣，開啟時搜尋欄一律清空
+function resetSearchBox() { if (!state.selection) { $('search').value = ''; updateSearchButtons(); } }
+resetSearchBox();
+window.addEventListener('pageshow', resetSearchBox);
+$('search').addEventListener('input', e => { updateSearchButtons(); clearTimeout(acTimer); acTimer = setTimeout(() => fetchSuggestions(e.target.value), 180); });
+$('search').addEventListener('keydown', e => {
+  if (imeComposing(e)) return;   // 注音／拼音選字中：Enter、方向鍵都是給輸入法用的
+  const items = [...$('suggest').children];
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!items.length) return;
+    e.preventDefault();
+    acActive = (acActive + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items.forEach((li, i) => li.classList.toggle('active', i === acActive));
+  } else if (e.key === 'Enter') doSearch();
+  else if (e.key === 'Escape') hideSuggest();
+});
+$('suggest').addEventListener('mousedown', e => { const li = e.target.closest('li'); if (li) { e.preventDefault(); selectPrediction(acList[+li.dataset.i]); } });
+$('search').addEventListener('blur', () => setTimeout(hideSuggest, 150));
+$('searchBtn').addEventListener('click', doSearch);
+$('clearSearch').addEventListener('click', () => { hideSuggest(); clearSelection(); });
+
+/* ---------- 圖層與控制 ---------- */
+function setMapType(t) {
+  state.mapType = t; lsSet('sunsv.mapType', t);
+  document.querySelectorAll('.lyr').forEach(b => b.classList.toggle('on', b.dataset.type === t));
+  // 縮圖顯示「切換後」的樣子，跟 Google 地圖一樣
+  const toSat = t !== 'hybrid';
+  $('layerMain').querySelector('.thumb').className = 'thumb ' + (toSat ? 'th-sat' : 'th-road');
+  $('layerLbl').textContent = toSat ? '衛星' : '預設';
+  map?.setMapTypeId(t);
+}
+$('layerMain').addEventListener('click', () => setMapType(state.mapType === 'hybrid' ? 'roadmap' : 'hybrid'));
+document.querySelectorAll('.lyr').forEach(b => b.addEventListener('click', () => setMapType(b.dataset.type)));
+setMapType(state.mapType);
+function locateMe() {
+  if (!navigator.geolocation) return toast('此瀏覽器不支援定位');
+  navigator.geolocation.getCurrentPosition(
+    p => setSelection({ name: '我的位置', lat: p.coords.latitude, lng: p.coords.longitude }),
+    () => toast('無法取得位置（請允許瀏覽器定位權限）'), { enableHighAccuracy: true, timeout: 10000 });
+}
+$('svBack').addEventListener('click', () => pano.setVisible(false));
+// 街景上的太陽標示（軌跡、位置、箭頭）一鍵開關，預設關閉
+function syncMarksChip() { $('svMarks').classList.toggle('on', !!state.opts.path); }
+$('svMarks').addEventListener('click', () => {
+  state.opts.path = !state.opts.path;
+  lsSet('sunsv.opts', state.opts);
+  document.querySelector('[data-opt="path"]').checked = state.opts.path;
+  syncMarksChip(); render();
+});
+syncMarksChip();
+$('faceSun').addEventListener('click', () => { const s = sunAt(state.minutes); pano.setPov({ heading: s.azimuth, pitch: Math.max(-10, Math.min(60, s.altitude)) }); });
+$('backSun').addEventListener('click', () => { const s = sunAt(state.minutes); pano.setPov({ heading: (s.azimuth + 180) % 360, pitch: 5 }); });
+$('svSave').addEventListener('click', () => {
+  const p = pano.getPosition();
+  openSaveModal({ name: pano.getLocation()?.description || state.selection?.name || '街景機位', lat: p.lat(), lng: p.lng(),
+                  heading: state.heading, pitch: state.pitch, zoom: state.zoom, pano: pano.getPano() },
+                `會連同鏡頭方向 ${state.heading.toFixed(0)}°（${dirName(state.heading)}）一起儲存，之後點選可直接回到這個構圖。`);
+});
+
+window.initMap = async function () {
+  $('keyModal').classList.remove('show');
+  const { Map, Polyline, Polygon } = await google.maps.importLibrary('maps');
+  const { StreetViewPanorama, StreetViewService } = await google.maps.importLibrary('streetView');
+  const { ControlPosition } = await google.maps.importLibrary('core');
+  Marker = makeHtmlMarkerClass();
+  try { geocoder = new (await google.maps.importLibrary('geocoding')).Geocoder(); } catch {}
+  try { Places = await google.maps.importLibrary('places'); } catch (err) { console.warn('Places 無法載入', err); }
+
+  map = new Map($('map'), {
+    center: state.mapCenter, zoom: state.mapZoom, mapTypeId: state.mapType,
+    mapTypeControl: false, fullscreenControl: false, streetViewControl: true, clickableIcons: true,
+    gestureHandling: 'greedy', zoomControl: true, cameraControl: false, rotateControl: false,
+    // 有 Map ID 就用向量地圖：路名、店名用字型即時繪製，跟 Google 地圖網頁一樣；沒有就用點陣圖磚
+    ...(getMapId() ? { mapId: getMapId(), renderingType: 'VECTOR' } : {}),
+  });
+  const locBtn = document.createElement('button');
+  locBtn.className = 'gm-btn'; locBtn.title = '顯示你的位置'; locBtn.innerHTML = icon('my_location', 20);
+  locBtn.addEventListener('click', locateMe);
+  map.controls[ControlPosition.RIGHT_BOTTOM].push(locBtn);
+
+  pano = new StreetViewPanorama($('pano'), {
+    visible: false, pov: { heading: state.heading, pitch: state.pitch }, zoom: state.zoom,
+    addressControl: false, fullscreenControl: false, motionTracking: false, motionTrackingControl: false,
+    showRoadLabels: true, enableCloseButton: false,
+  });
+  map.setStreetView(pano);
+  sv = new StreetViewService();
+
+  sunRay = new Polyline({ map, strokeColor: '#f9ab00', strokeWeight: 4, strokeOpacity: .95, clickable: false, zIndex: 3 });
+  shadowRay = new Polyline({ map, strokeColor: '#202124', strokeWeight: 6, strokeOpacity: .6, clickable: false, zIndex: 2 });
+  const dash = color => [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: color, scale: 3 }, offset: '0', repeat: '14px' }];
+  riseRay = new Polyline({ map, strokeOpacity: 0, icons: dash('#fbbc04'), clickable: false });
+  setRay = new Polyline({ map, strokeOpacity: 0, icons: dash('#fa7b17'), clickable: false });
+  viewCone = new Polygon({ map, strokeWeight: 0, fillColor: '#1a73e8', fillOpacity: .3, clickable: false });
+  const sunEl = document.createElement('div'); sunEl.className = 'sun-pin';
+  sunPin = new Marker({ map, content: sunEl, zIndex: 5, anchor: 'center' });
+  const pinEl = document.createElement('div'); pinEl.innerHTML = RED_PIN;
+  selMarker = new Marker({ map, content: pinEl, zIndex: 10 });
+
+  pano.addListener('visible_changed', () => setMode(pano.getVisible()));
+  let newestT = 0;
+  pano.addListener('pano_changed', () => { clearTimeout(newestT); newestT = setTimeout(ensureNewestPano, 150); });
+  pano.addListener('position_changed', () => {
+    const p = pano.getPosition(); if (!p) return;
+    state.focus = { lat: p.lat(), lng: p.lng() };
+    if (state.sv) map.panTo(p);
+    render({ bandsToo: true });
+    scheduleShade();
+  });
+  pano.addListener('status_changed', () => {
+    $('svTitle').textContent = pano.getLocation()?.description || state.selection?.name || '街景';
+  });
+  pano.addListener('pov_changed', () => {
+    const v = pano.getPov(); state.heading = (v.heading + 360) % 360; state.pitch = v.pitch; render();
+  });
+  pano.addListener('zoom_changed', () => { state.zoom = pano.getZoom(); render(); });
+
+  map.addListener('idle', () => {
+    if (state.sv) return;
+    const c = map.getCenter(); state.mapCenter = { lat: c.lat(), lng: c.lng() }; state.mapZoom = map.getZoom();
+    if (!state.selection) state.focus = { ...state.mapCenter };
+    render();
+  });
+  map.addListener('click', e => {
+    $('menu').classList.remove('show');
+    if (state.sv) { enterStreetView({ lat: e.latLng.lat(), lng: e.latLng.lng() }); return; }
+    if (e.placeId) { e.stop(); if (Places) showPlaceById(e.placeId, e.latLng); else dropPin(e.latLng); }
+    else dropPin(e.latLng);
+  });
+
+  renderSavedMarkers();
+  if (hashInit?.sv) enterStreetView(state.focus, { heading: state.heading, pitch: state.pitch, zoom: state.zoom });
+  render({ bandsToo: true });
+};
+
+window.gm_authFailure = function () {
+  $('keyErr').textContent = '金鑰驗證失敗：請確認金鑰正確、已啟用 Maps JavaScript API、已綁定帳單，且參照網址限制包含目前網址。';
+  $('keyErr').style.display = 'block';
+  $('keyModal').classList.add('show');
+};
+
+function loadMaps(key) {
+  const s = document.createElement('script');
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&language=zh-TW&region=TW&loading=async&callback=initMap`;
+  s.async = true;
+  s.onerror = () => toast('無法載入 Google Maps，請檢查網路');
+  document.head.appendChild(s);
+}
+// 預設用你 Google Cloud 專案裡建立的向量 Map ID（Map ID 不是機密，可以寫在程式裡）；在設定裡填別的會優先使用
+const DEFAULT_MAP_ID = 'f403930763d97bed76380888';
+function getMapId() { try { return localStorage.getItem('gmapsMapId') || DEFAULT_MAP_ID; } catch { return DEFAULT_MAP_ID; } }
+function getKey() { try { return localStorage.getItem('gmapsKey') || ''; } catch { return ''; } }
+$('keySave').addEventListener('click', () => {
+  const k = $('keyInput').value.trim(); if (!k) return;
+  try { localStorage.setItem('gmapsKey', k); localStorage.setItem('gmapsMapId', $('mapIdInput').value.trim()); localStorage.setItem('cwaKey', $('cwaKeyInput').value.trim()); } catch {}
+  location.reload();
+});
+$('keyInput').addEventListener('keydown', e => { if (!imeComposing(e) && e.key === 'Enter') $('keySave').click(); });
+
+const urlKey = new URLSearchParams(location.search).get('key');
+if (urlKey) { try { localStorage.setItem('gmapsKey', urlKey); } catch {} }
+const key = urlKey || getKey();
+render({ bandsToo: true });
+if (key) loadMaps(key); else $('keyModal').classList.add('show');
+</script>
+</body>
+</html>
