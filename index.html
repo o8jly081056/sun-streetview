@@ -280,6 +280,7 @@
   #wxInfo:empty, #svDate:empty { display: none; }
   #svDate { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #9aa0a6; margin-top: 2px; }
   .week-card { display: none; flex-direction: column; gap: 0; padding: 12px 0 8px; max-height: calc(100vh - 560px); min-height: 180px; overflow-y: auto; }
+  .week-card:not(.show) { display: none !important; }
   .week-card.show { display: flex; }
   .week-card .wk-head { padding: 0 16px 6px; font: 500 14px/20px var(--font-title); }
   .week-card .wk-head .sub { color: #bdc1c6; font-weight: 400; }
@@ -373,10 +374,20 @@
     .hero { margin-top: -12px; height: 180px; border-radius: 24px 24px 0 0; }
     #sideToggle { display: none !important; }
     #timebar, body.dark #timebar, body.side-open #timebar { left: 8px; right: 8px; width: auto; transform: none; min-width: 0; bottom: 8px; padding: 8px 10px; }
-    body.side-open #timebar { display: none; }
+    body.side-open:not(.sv) #timebar { display: none; }
     #layerTile { bottom: 150px; left: 8px; }
-    body.sv #map { width: 140px; height: 100px; left: 8px; bottom: 150px; }
-    #svTop { width: calc(100vw - 140px); left: 8px; top: 8px; }
+    body.sv #map { width: 120px; height: 90px; left: 8px; bottom: 132px; }
+    #svTop { width: calc(100vw - 108px); left: 8px; top: 8px; gap: 6px; }
+    .sv-card { padding: 6px 10px 8px 2px; }
+    #svTitle { font-size: 14px; line-height: 20px; margin-top: 6px; }
+    #adviceText { font-size: 13px; line-height: 18px; margin-top: 4px; }
+    #svDate { display: none; }
+    /* 按鈕列改成一排、可左右滑動，延伸到螢幕右邊 */
+    .sv-chips { flex-wrap: nowrap; overflow-x: auto; width: calc(100vw - 16px); scrollbar-width: none; padding-bottom: 2px; }
+    .sv-chips::-webkit-scrollbar { display: none; }
+    .sv-chips button { flex: none; height: 30px; font-size: 13px; padding: 0 12px 0 10px; }
+    .week-card { width: calc(100vw - 16px); max-height: calc(100vh - 330px); min-height: 0; }
+    .legend { display: none; }
     #compass { width: 84px; height: 84px; right: 8px; top: 8px; }
   }
 </style>
