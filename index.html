@@ -126,6 +126,7 @@
   .sec-title { font: 500 16px/24px var(--font-title); padding: 8px 24px 4px; letter-spacing: 0; }
   .dir-grid { display: grid; grid-template-columns: 72px 1fr; gap: 4px 12px; padding: 0 24px 8px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
   .dir-grid .d { color: var(--sub); }
+  .dir-grid .dir-note { color: var(--sub); }   /* 跟時間同字級，只用灰色區分 */
   .dir-grid > div:nth-child(even) { display: flex; flex-wrap: wrap; gap: 0 12px; }
   .light-grid { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px 12px; padding: 4px 24px 12px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
   .light-grid .h { color: var(--sub); font-size: 12px; line-height: 16px; letter-spacing: .2px; }
@@ -1981,8 +1982,8 @@ function directionsHtml(at) {
     const merged = [];
     for (const x of sunny) { const p = merged[merged.length - 1]; if (p && x.a - p.b <= 20) p.b = x.b; else merged.push({ ...x }); }
     const best = merged.sort((x, y) => (y.b - y.a) - (x.b - x.a)).slice(0, 2).sort((x, y) => x.a - y.a);
-    const cell = !all.length ? '<span class="sub">照不到太陽</span>'
-      : best.length ? best.map(x => tjump(x.a, x.b)).join('') : '<span class="sub">預報多雲</span>';
+    const cell = !all.length ? '<span class="dir-note">照不到太陽</span>'
+      : best.length ? best.map(x => tjump(x.a, x.b)).join('') : '<span class="dir-note">預報多雲</span>';
     return `<div class="d">${dirName(f)}面</div><div>${cell}</div>`;
   }).join('');
   return `<div class="sec-title">建築正面何時順光</div>
