@@ -1521,7 +1521,7 @@ function drawLamps(W, H, v, nightK, wx, base) {
   sctx.save();
   sctx.globalCompositeOperation = 'lighten';
   // 都市環境光：地平線以下（街道、一樓店面）稍微亮一點、偏暖
-  const amb = sctx.createLinearGradient(0, hy - H * .15, 0, H);
+  const amb = sctx.createLinearGradient(0, hy, 0, H);   // 從地平線以下才開始，不調亮天空
   amb.addColorStop(0, `rgb(${mixc([255, 214, 170], .0)})`);
   amb.addColorStop(.35, `rgb(${mixc([255, 214, 170], .22 * nightK * urban)})`);
   amb.addColorStop(1, `rgb(${mixc([255, 214, 170], .12 * nightK * urban)})`);
@@ -1547,31 +1547,37 @@ function drawLamps(W, H, v, nightK, wx, base) {
       g.addColorStop(1, `rgb(${base})`);
       sctx.fillStyle = g; sctx.beginPath(); sctx.arc(0, 0, rx, 0, 7); sctx.fill(); sctx.restore();
     }
-    if (mid) {
-      // 燈桿周圍的牆面、樹、招牌
+    // 燈桿周圍的牆面、樹、招牌：只給 25 公尺內的燈，而且只往燈頭以下照。
+    // 遠處的燈若也畫，光圈會跑進照片的白天天空，變成一顆顆像月亮的亮斑
+    // 而且燈的後方 15 公尺內要真的有建築（有牆可以照），空地、公園就不畫
+    const wall = mid && L.d <= 25 && blist.length > 0 && rayHits(0, 0, L.az, L.d + 15, blist).some(h => h.d > L.d - 1);
+    const head = wall ? project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H) : null;
+    if (head) {
       const r = Math.min(W, fp * 7 / L.d * haze);
+      sctx.save(); sctx.beginPath(); sctx.rect(0, head.y, W, H); sctx.clip();
       const g = sctx.createRadialGradient(mid.x, mid.y, 0, mid.x, mid.y, r);
       g.addColorStop(0, `rgb(${mixc(col, k * .75)})`);
       g.addColorStop(1, `rgb(${base})`);
       sctx.fillStyle = g; sctx.beginPath(); sctx.arc(mid.x, mid.y, r, 0, 7); sctx.fill();
+      sctx.restore();
     }
   }
   sctx.restore();
 
-  // 燈頭：小的暖色亮點＋淡光暈。只畫 40 公尺內的燈頭（更遠的只留地面光），
+  // 燈頭：小的暖色亮點＋淡光暈。只畫 25 公尺內的燈頭（更遠的只留地面光），
   // 避免遠處燈頭在天空變成一顆顆像月亮的白色圓盤
   for (const L of lamps) {
-    if (L.hidden || L.d > 40) continue;
+    if (L.hidden || L.d > 25) continue;   // 只畫近處燈頭，遠處只留地面光
     const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
     if (!head) continue;
     const col = L.sodium ? '255,176,92' : '255,226,192', near = Math.max(0, 1 - L.d / 40);
     const a = nightK * (.35 + .65 * near);
-    const core = Math.max(1.5, Math.min(6, fp * .12 / L.d)), r = Math.max(6, Math.min(36, fp * .45 / L.d)) * haze;
+    const core = Math.max(1, Math.min(2.5, fp * .06 / L.d)), r = Math.max(5, Math.min(24, fp * .3 / L.d)) * haze;   // 小小的暖色光點，跟冷白色的月亮區分
     const g = gctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
     g.addColorStop(0, `rgba(${col},${(a * .55).toFixed(3)})`);
     g.addColorStop(1, `rgba(${col},0)`);
     gctx.fillStyle = g; gctx.beginPath(); gctx.arc(head.x, head.y, r, 0, 7); gctx.fill();
-    gctx.fillStyle = `rgba(255,240,215,${Math.min(1, a).toFixed(3)})`;
+    gctx.fillStyle = `rgba(255,212,150,${Math.min(1, a).toFixed(3)})`;
     gctx.beginPath(); gctx.arc(head.x, head.y, core, 0, 7); gctx.fill();
   }
 }
