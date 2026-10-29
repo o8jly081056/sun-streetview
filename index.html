@@ -91,6 +91,12 @@
   .hero { margin: -72px 0 0; height: 240px; background: #e8eaed center/cover no-repeat; position: relative; }
   .hero .cred { position: absolute; right: 8px; bottom: 6px; font-size: 12px; letter-spacing: .2px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.8); max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hero .cred a { color: inherit; }
+  .hero-more { position: absolute; left: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px;
+    border-radius: 16px; background: rgba(31,31,31,.72); color: #fff; font-size: 13px; font-weight: 500; text-decoration: none; transition: opacity .15s; }
+  .hero-more:hover { background: rgba(31,31,31,.88); }
+  body.hero-moved .hero-more { opacity: 0; pointer-events: none; }
+  .rv-count { color: inherit; text-decoration: none; }
+  .rv-count:hover { text-decoration: underline; color: var(--blue); }
   .hero .cred { transition: opacity .15s; }
   body.hero-moved .hero .cred { opacity: 0; pointer-events: none; }
   .rating { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--sub); margin-top: 4px; }
@@ -2680,11 +2686,14 @@ function renderPlace() {
     $('view-place').innerHTML = `<div class="hero"></div><div class="pad"><div class="loading-line" style="width:60%;height:20px"></div><div class="loading-line" style="width:40%"></div><div class="loading-line" style="width:80%"></div></div>`;
     return;
   }
+  // 更多相片、評論全文都連到 Google 地圖（不另外向 API 抓，避免多付費用）
+  const gmUrl = d?.gmaps || (sel.placeId ? `https://www.google.com/maps/search/?api=1&query=${sel.lat},${sel.lng}&query_place_id=${sel.placeId}` : '');
   $('view-place').innerHTML = `
-    ${d?.photo ? `<div class="hero" style="background-image:url('${esc(d.photo)}')">${d.photoCredit ? `<div class="cred">${d.photoCredit}</div>` : ''}</div>` : ''}
+    ${d?.photo ? `<div class="hero" style="background-image:url('${esc(d.photo)}')">${d.photoCredit ? `<div class="cred">${d.photoCredit}</div>` : ''}
+      ${gmUrl ? `<a class="hero-more" href="${esc(gmUrl)}" target="_blank" rel="noopener">${icon('camera', 18)}看更多相片</a>` : ''}</div>` : ''}
     <div class="pad">
       <h1 class="ptitle">${esc(sel.name)}</h1>
-      ${d?.rating ? `<div class="rating">${d.rating.toFixed(1)} <span class="stars">${starsHtml(d.rating)}</span> <span>(${d.ratingCount.toLocaleString()})</span></div>` : ''}
+      ${d?.rating ? `<div class="rating">${d.rating.toFixed(1)} <span class="stars">${starsHtml(d.rating)}</span> <a class="rv-count" href="${esc(gmUrl)}" target="_blank" rel="noopener" title="在 Google 地圖看評論">(${d.ratingCount.toLocaleString()})</a></div>` : ''}
       ${d?.type ? `<div class="ptype">${esc(d.type)}</div>` : ''}
       ${!d ? `<div class="sub">${esc(sel.address || `${sel.lat.toFixed(6)}, ${sel.lng.toFixed(6)}`)}</div>` : ''}
       ${sel.note ? `<div style="margin-top:6px">${esc(sel.note)}</div>` : ''}
