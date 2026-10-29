@@ -64,6 +64,7 @@
   .rail-btn { width: 72px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--icon); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .2px; }
   .rail-btn .pill { width: 48px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; }
   .rail-btn:hover .pill { background: var(--hover); }
+  .rail-btn + .rail-btn { margin-top: 16px; }   /* 上一個項目文字到下一個圖示 32px，跟漢堡選單到第一個項目一樣 */
   .rail-btn.on { color: var(--on-tonal); }
   .rail-btn.on .pill { background: var(--blue-bg); }
   #menuBtn { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--icon); margin-bottom: 8px; }
