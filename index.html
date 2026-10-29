@@ -36,8 +36,8 @@
        原版也沒有實際載入 Google Sans Text，所以這裡同樣不載入 */
     --font: "Google Sans Text", "Google Sans", Roboto, Arial, sans-serif;
     --font-title: "Google Sans", Roboto, Arial, sans-serif;
-    /* 光線方向色：只代表方向、不代表好壞（不用紅綠燈色）；好不好看太陽高度，畫在深淺上 */
-    --front: #669df6; --sidelit: #4ecde6; --sideback: #af5cf7; --back: #f06fb5; --top: #9aa0a6; --night: #3c4043;
+    /* 光線方向色：順光綠 → 逆光紅；太陽偏高的時段在時間軸上變淡 */
+    --front: #34a853; --sidelit: #fbbc04; --sideback: #fa7b17; --back: #ea4335; --top: #a142f4; --night: #3c4043;
     /* 時段色 */
     --day: #aecbfa; --golden: #f9ab00; --bluehr: #4a6fd8;
     --railW: 72px; --sideW: 408px; --mapLeft: var(--railW);
@@ -1033,7 +1033,15 @@ function drawCompass() {
 
 /* ---------- 時間色帶 ---------- */
 const TB_SOFT = '#9aa0a6', TB_INDOOR = '#e6c15a';   // 柔光（陰天、在影子裡）、人工照明（隧道／室內）
-const SUIT = { good: '#34a853', ok: '#fbbc04', bad: '#ea4335' };
+// 時間軸的方向色依太陽高度變淡：LOW_ALT 以下全彩，越接近頂光越灰（光越硬）
+function bandColor(c, alt) {
+  const hex = cssVar(c.color);
+  if (!['front', 'side', 'sideback', 'back'].includes(c.key) || !hex.startsWith('#')) return hex;
+  const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  const t = Math.min(1, Math.max(0, (alt - LOW_ALT) / (TOP_ALT - LOW_ALT))) * .6;
+  const g = rgb[0] * .3 + rgb[1] * .59 + rgb[2] * .11;
+  return `rgb(${rgb.map(v => Math.round(v + (g - v) * t)).join()})`;
+}
 // 「我要的光」：建議時段、未來 7 天、拍攝行程都依這個挑；全部都只挑低角度（≤ LOW_ALT）的晴朗時段
 const WANT = {
   any: { name: '低角度光', chip: '不限方向', keys: ['front', 'side', 'sideback', 'back'] },
@@ -1042,15 +1050,12 @@ const WANT = {
   back: { name: '逆光', chip: '逆光', keys: ['back', 'sideback'] },
 };
 const want = () => WANT[state.opts.want] || WANT.any;
-// 街景時間軸的適合度（紅黃綠）：綠＝「我要的光」方向＋低角度＋晴朗（跟建議時段完全一致）；
-// 黃＝方向對但太陽偏高；紅＝頂光或方向不對；灰＝陰天或主體在影子裡；夜間維持深色
-function suitAt(m, heading = state.heading, at = state.focus) {
-  if (isCovered()) return { key: 'indoor', color: TB_INDOOR };
+// 街景時間軸的顏色：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光（灰）；夜間維持深色
+function bandAt(m, heading = state.heading, at = state.focus) {
+  if (isCovered()) return TB_INDOOR;
   const s = sunAt(m, at), c = classify(s, heading);
-  if (c.key === 'night') return { key: 'night', color: cssVar('var(--night)') };
-  if (wxFactors(wxAt(m, at)).direct < SUNNY_MIN || subjectShaded(m)) return { key: 'soft', color: TB_SOFT };
-  if (c.key === 'top' || !want().keys.includes(c.key)) return { key: 'bad', color: SUIT.bad };
-  return s.altitude <= LOW_ALT ? { key: 'good', color: SUIT.good } : { key: 'ok', color: SUIT.ok };
+  if (c.key !== 'night' && (wxFactors(wxAt(m, at)).direct < SUNNY_MIN || subjectShaded(m))) return TB_SOFT;
+  return bandColor(c, s.altitude);
 }
 // 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
 const SUNNY_MIN = .3;
@@ -1060,7 +1065,7 @@ function drawBands() {
   const step = 5;
   for (let m = 0; m < 1440; m += step) {
     const s = sunAt(m + step / 2);
-    bctx.fillStyle = state.sv ? suitAt(m + step / 2).color : cssVar(classifyAlt(s).color);
+    bctx.fillStyle = state.sv ? bandAt(m + step / 2) : cssVar(classifyAlt(s).color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
   }
   const t = timesAt();
@@ -1072,7 +1077,7 @@ function drawBands() {
   drawSunlit();
   const items = state.sv
     ? (isCovered() ? [[TB_INDOOR, '人工照明（隧道／室內，不受日照影響）']]
-      : [[SUIT.good, `適合（${want().name}）`], [SUIT.ok, '普通（太陽偏高）'], [SUIT.bad, '不適合'], [TB_SOFT, '柔光（陰天／影子）']])
+      : [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光'], ['#80868b', '淡色＝太陽偏高']])
     : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
   $('legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
 
@@ -2151,7 +2156,7 @@ function updateInfo() {
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
     $('svWx').classList.toggle('on', manualWx);
     const diffuse = c.key !== 'night' && wf.direct < SUNNY_MIN;
-    $('badge').querySelector('.dot').style.background = suitAt(now).color;
+    $('badge').querySelector('.dot').style.background = bandAt(now);
     if (diffuse) {
       // 雲遮住太陽：沒有明顯的順逆光，光線柔和
       $('badgeText').textContent = wf.rain > .05 ? '散射光 · 下雨中' : '散射光 · 光線柔和';
@@ -2409,7 +2414,7 @@ function renderListDetail() {
     ${l.items.map(it => `
       <div class="row-btn" data-item="${it.id}" role="button" tabindex="0">
         <span class="list-icon" style="background:${l.color}">${icon(it.heading != null ? 'camera' : 'place', 20)}</span>
-        <span class="t"><div>${esc(it.name)}${it.lat == null ? ' <span style="color:#d93025">· 未定位</span>' : ''}</div>
+        <span class="t"><div>${esc(it.name)}${it.lat == null ? ' <span style="color:var(--back)">· 未定位</span>' : ''}</div>
           <div class="sub">${esc(it.note || it.address || (it.lat != null ? `${it.lat.toFixed(5)}, ${it.lng.toFixed(5)}` : '點一下自動查找位置'))}</div></span>
         <button class="icon-btn del" data-act="delitem" title="移除">${icon('close', 20)}</button>
       </div>`).join('') || '<div class="sub" style="padding:12px 24px">這個清單還是空的。在地點上按「儲存」即可加入。</div>'}
@@ -2723,8 +2728,12 @@ function renderWeek() {
   for (let i = 0; i < 7; i++) {
     const d = addDays(today, i), p = dayPlan(at, h, d);
     const loading = p.src === 'loading';
-    // 小色條（05:00–20:00）：只畫建議時段，跟時間軸的綠色段一致
-    const bar = p.sunny.map(x => `<i style="left:${(x.a - 300) / 900 * 100}%;width:${(x.b - x.a) / 900 * 100}%;background:${SUIT.good}"></i>`).join('');
+    // 小色條（05:00–20:00）：只畫建議時段，顏色跟時間軸一樣是方向色
+    const bar = withCtx({ date: d, focus: at, heading: h }, () => p.sunny.flatMap(x => {
+      const out = [];
+      for (let m = x.a; m < x.b; m += 5) { const s = sunAt(m + 2.5, at); out.push(`<i style="left:${(m - 300) / 900 * 100}%;width:${5 / 900 * 100 + .2}%;background:${bandColor(classify(s, h), s.altitude)}"></i>`); }
+      return out;
+    })).join('');
     const best = loading ? '<span class="none">取得天氣中…</span>'
       : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
       : p.good.length ? `<span class="none">${want().name}時段預報多雲或被擋住</span>` : `<span class="none">這個角度沒有${want().name}</span>`;
