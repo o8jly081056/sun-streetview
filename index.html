@@ -108,8 +108,8 @@
   .loading-line { height: 12px; border-radius: 6px; background: #eef2f3; margin: 10px 0; }
   .ptitle { font: 400 22px/28px var(--font-title); margin: 16px 0 0; color: var(--text); letter-spacing: 0; }
   .divider { height: 1px; background: var(--line); margin: 8px 0; }
-  .actions { display: flex; justify-content: center; padding: 16px 12px 8px; }
-  .act { display: flex; flex-direction: column; align-items: center; width: 72px; color: var(--on-tonal); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .2px; text-align: center; }
+  .actions { display: flex; justify-content: space-between; padding: 16px 12px 8px; }
+  .act { flex: 1 1 0; min-width: 0; white-space: nowrap; display: flex; flex-direction: column; align-items: center; width: auto; color: var(--on-tonal); font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .2px; text-align: center; }
   .act .circle { width: 40px; height: 40px; margin: 4px 4px 4px; border-radius: 50%; background: var(--blue-bg); display: flex; align-items: center; justify-content: center; }
   .act .circle svg { width: 18px; height: 18px; }
   .act:hover .circle { filter: brightness(.95); }
@@ -135,6 +135,17 @@
   .trip-row:hover { background: var(--hover); }
   .trip-row .tm { width: 52px; flex: none; font: 500 15px/20px var(--font-title); color: var(--blue); font-variant-numeric: tabular-nums; }
   .trip-row .tm .sub { font-weight: 400; }
+  .ptabs { display: flex; border-bottom: 1px solid #c7c7c7; margin-top: 8px; }
+  .ptabs button { flex: 1 1 0; height: 48px; font-size: 14px; font-weight: 500; color: var(--sub); position: relative; }
+  .ptabs button:hover { background: var(--hover); }
+  .ptabs button.on { color: var(--blue); }
+  .ptabs button.on::after { content: ""; position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%); width: 40px; height: 3px; border-radius: 3px 3px 0 0; background: var(--blue); }
+  .rv-summary { display: flex; align-items: center; gap: 16px; padding: 20px 24px 12px; }
+  .rv-big { font: 400 48px/56px var(--font-title); color: var(--text); }
+  .rv-summary .stars { color: #fbbc04; display: inline-flex; }
+  .rv-summary .stars svg { width: 18px; height: 18px; }
+  .rv-summary .stars .off { color: #dadce0; }
+  .about-hours { list-style: none; margin: 0; padding: 0 24px 8px; font-size: 14px; line-height: 24px; }
   .tl-row { display: flex; gap: 16px; padding: 4px 24px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
   .tl-k { width: 32px; flex: none; color: var(--sub); }
   .tl-arrow { color: #c4c7c5; margin: 0 6px; }
@@ -409,7 +420,9 @@
     #view-place > * { order: 4; }
     #view-place > .pad { order: 1; }
     #view-place > .actions { order: 2; }
-    #view-place > .hero { order: 3; margin: 8px 16px 4px; height: 168px; border-radius: 12px; overflow: hidden; }
+    #view-place > .ptabs { order: 3; }
+    #view-place > #ptabBody { order: 5; }
+    #view-place > .hero { order: 2; margin: 8px 16px 4px; height: 168px; border-radius: 12px; overflow: hidden; }
     .ptitle { margin-top: 4px; }
     .actions { justify-content: flex-start; gap: 8px; overflow-x: auto; padding: 12px 16px 8px; scrollbar-width: none; }
     .actions::-webkit-scrollbar { display: none; }
@@ -2676,6 +2689,9 @@ function renderPlace() {
       ${!d ? `<div class="sub">${esc(sel.address || `${sel.lat.toFixed(6)}, ${sel.lng.toFixed(6)}`)}</div>` : ''}
       ${sel.note ? `<div style="margin-top:6px">${esc(sel.note)}</div>` : ''}
     </div>
+    ${sel.placeId ? `<div class="ptabs" role="tablist">${[['overview', '總覽'], ['reviews', '評論'], ['about', '簡介']].map(([k, l]) =>
+      `<button role="tab" class="${placeTab(sel) === k ? 'on' : ''}" data-ptab="${k}">${l}</button>`).join('')}</div>` : ''}
+    ${placeTab(sel) !== 'overview' ? `<div id="ptabBody">${placeTabHtml(sel)}</div>` : `
     <div class="actions">
       ${actBtn('pcStreet', 'streetview', '街景', true)}
       ${actBtn('pc3d', 'cube', '3D 陰影')}
@@ -2685,7 +2701,9 @@ function renderPlace() {
     </div>
     <div class="divider"></div>
     ${d ? placeRowsHtml(sel) + '<div class="divider"></div>' : ''}
-    <div id="pcSun"></div>`;
+    <div id="pcSun"></div>`}`;
+  $('view-place').querySelectorAll('[data-ptab]').forEach(b => b.onclick = () => { state.placeTab = b.dataset.ptab; renderPlace(); syncSideHead(); });
+  if (placeTab(sel) !== 'overview') return;
   updatePlaceSun();
   $('pcStreet').onclick = () => enterStreetView(sel);
   $('pc3d').onclick = enter3D;
@@ -2693,6 +2711,30 @@ function renderPlace() {
   $('pcShare').onclick = () => { writeHash(); navigator.clipboard?.writeText(location.href).then(() => toast('已複製連結'), () => toast('無法複製')); };
   $('pcG').onclick = () => window.open(d?.gmaps || `https://www.google.com/maps/search/?api=1&query=${sel.lat},${sel.lng}` + (sel.placeId ? `&query_place_id=${sel.placeId}` : ''), '_blank', 'noopener');
 }
+/* ---- 地點分頁：總覽／評論／簡介（跟 Google 地圖一樣）
+   不另外向 Google 抓評論內容（屬於計費較高的欄位）；只用打開地點時已經拿到的資料，評論全文連到 Google 地圖 ---- */
+function placeTab(sel) {
+  if (state.placeTabFor !== sel.placeId) { state.placeTabFor = sel.placeId; state.placeTab = 'overview'; }
+  return state.placeTab || 'overview';
+}
+function placeTabHtml(sel) {
+  const d = sel.details || {}, gm = d.gmaps || `https://www.google.com/maps/search/?api=1&query=${sel.lat},${sel.lng}&query_place_id=${sel.placeId}`;
+  if (placeTab(sel) === 'reviews') {
+    return `<div class="rv-summary">
+        ${d.rating ? `<div class="rv-big">${d.rating.toFixed(1)}</div><div><div class="stars">${starsHtml(d.rating)}</div><div class="sub">${d.ratingCount.toLocaleString()} 則評論</div></div>`
+          : '<div class="sub">這個地點還沒有評分</div>'}
+      </div>
+      <div style="padding:4px 24px 20px"><a class="pill-btn" href="${esc(gm)}" target="_blank" rel="noopener">${icon('open', 18)}在 Google 地圖看評論</a></div>`;
+  }
+  // 簡介：類型、地址、完整營業時間、網站、電話
+  const rows = [];
+  if (d.type) rows.push(infoRow('place', esc(d.type), '類型'));
+  rows.push(infoRow('place', esc(sel.address || `${sel.lat.toFixed(6)}, ${sel.lng.toFixed(6)}`), '地址'));
+  if (d.website) rows.push(infoRow('web', `<a href="${esc(d.website)}" target="_blank" rel="noopener">${esc(d.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>`, '網站'));
+  if (d.phone) rows.push(infoRow('phone', `<a href="tel:${esc(d.phone.replace(/\s/g, ''))}">${esc(d.phone)}</a>`, '電話'));
+  return rows.join('') + (d.hours?.length ? `<div class="divider"></div><div class="sec-title">營業時間</div><ol class="about-hours">${d.hours.map(h => `<li>${esc(h)}</li>`).join('')}</ol>` : '');
+}
+
 // 時間變動時只重畫日照區塊，照片與營業時間不閃
 function updatePlaceSun() {
   const el = $('pcSun'), sel = state.selection;
