@@ -375,8 +375,11 @@
   #adviceText .sub { color: #bdc1c6; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   .sv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* 桌面：固定每排兩顆，分組才清楚（手機版另外改成一排可左右滑） */
+  @media (min-width: 761px) { #svTop .sv-chips { display: grid; grid-template-columns: repeat(2, max-content); } body.no3d #sv3d { display: none; } }
   .sv-chips button { height: 32px; padding: 0 16px 0 12px; border-radius: 16px; background: rgba(31,31,31,.88); color: #fff; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; line-height: 20px; }
   .sv-chips button:hover { background: rgba(68,71,70,.95); }
+  .sv-chips button:focus:not(:focus-visible) { outline: none; }   /* 滑鼠點過不留焦點框，鍵盤操作才顯示 */
   #shadeInfo { font-size: 13px; margin-top: 4px; color: #fde293; }
   #shadeInfo.shaded { color: #c4c7c5; }
   #shadeInfo.lamp { color: #fde293; font-size: 12px; line-height: 16px; letter-spacing: .2px; }
@@ -511,12 +514,13 @@
     </div>
     <div id="wxMenu" class="wx-menu"></div>
     <div class="sv-chips">
+      <!-- 依規劃流程排：先挑時間與天氣 → 再調鏡頭方向 → 最後輔助與存檔 -->
+      <button id="svWeek" data-icon="clock" data-size="18">未來 7 天</button>
+      <button id="svWx" data-icon="cloud" data-size="18"><span id="svWxLbl">天氣：預報</span></button>
       <button id="faceSun" data-icon="sun" data-size="18">轉向太陽</button>
       <button id="backSun" data-icon="sun_back" data-size="18">背對太陽</button>
-      <button id="svSave" data-icon="bookmark_border" data-size="18">儲存此機位</button>
       <button id="svMarks" data-icon="visibility" data-size="18">太陽標示</button>
-      <button id="svWx" data-icon="cloud" data-size="18"><span id="svWxLbl">天氣：預報</span></button>
-      <button id="svWeek" data-icon="clock" data-size="18">未來 7 天</button>
+      <button id="svSave" data-icon="bookmark_border" data-size="18">儲存此機位</button>
       <button id="sv3d" data-icon="cube" data-size="18">3D 視角</button>
     </div>
     <div id="weekCard" class="sv-card week-card"></div>
