@@ -36,8 +36,8 @@
        原版也沒有實際載入 Google Sans Text，所以這裡同樣不載入 */
     --font: "Google Sans Text", "Google Sans", Roboto, Arial, sans-serif;
     --font-title: "Google Sans", Roboto, Arial, sans-serif;
-    /* 光線分類色 */
-    --front: #34a853; --sidelit: #fbbc04; --sideback: #fa7b17; --back: #ea4335; --top: #a142f4; --night: #3c4043;
+    /* 光線方向色：只代表方向、不代表好壞（不用紅綠燈色）；好不好看太陽高度，畫在深淺上 */
+    --front: #669df6; --sidelit: #4ecde6; --sideback: #af5cf7; --back: #f06fb5; --top: #9aa0a6; --night: #3c4043;
     /* 時段色 */
     --day: #aecbfa; --golden: #f9ab00; --bluehr: #4a6fd8;
     --railW: 72px; --sideW: 408px; --mapLeft: var(--railW);
@@ -373,6 +373,10 @@
   #svTop .tjump { color: var(--dark-accent); }
   #svTop .tjump:hover { background: rgba(127,211,224,.15); }
   #adviceText .sub { color: #bdc1c6; }
+  .want-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .want-row button { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid #5f6368; color: #e8eaed; font-size: 12px; font-weight: 500; }
+  .want-row button:hover { background: rgba(255,255,255,.08); }
+  .want-row button.on { background: var(--dark-accent); border-color: var(--dark-accent); color: #062e33; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   .sv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
   /* 桌面：固定每排兩顆，分組才清楚（手機版另外改成一排可左右滑） */
@@ -869,10 +873,12 @@ function msAt(minutes) {
 const sunAt = (minutes, at = state.focus) => Sun.position(msAt(minutes), at.lat, at.lng);
 const timesAt = (at = state.focus) => Sun.times(msAt(720), at.lat, at.lng);
 
+// 太陽高於 TOP_ALT 算頂光（硬、影子短）；低於 LOW_ALT 算低角度光（立體、有質感），建議時段只挑這段
+const TOP_ALT = 50, LOW_ALT = 35;
 // 依鏡頭朝向判斷光線類型
 function classify(sun, heading) {
   if (sun.altitude <= -0.833) return { key: 'night', label: '無直射光', color: 'var(--night)' };
-  if (sun.altitude > 65) return { key: 'top', label: '頂光', color: 'var(--top)' };
+  if (sun.altitude > TOP_ALT) return { key: 'top', label: '頂光', color: 'var(--top)' };
   const d = Math.abs(norm180(sun.azimuth - heading));
   if (d < 40) return { key: 'back', label: '逆光', color: 'var(--back)' };
   if (d < 75) return { key: 'sideback', label: '側逆光', color: 'var(--sideback)' };
@@ -1026,7 +1032,24 @@ function drawCompass() {
 }
 
 /* ---------- 時間色帶 ---------- */
-const TB_SOFT = '#9aa0a6', TB_INDOOR = '#e6c15a';   // 柔光、人工照明（隧道／室內）
+const TB_SOFT = '#8fc0a0', TB_INDOOR = '#e6c15a';   // 柔光（陰天、在影子裡，也是好拍的光）、人工照明（隧道／室內）
+// 時間軸上的方向色依太陽高度變淡：10° 以下最飽和，越接近頂光越灰
+function bandColor(c, alt) {
+  const hex = cssVar(c.color);
+  if (!['front', 'side', 'sideback', 'back'].includes(c.key) || !hex.startsWith('#')) return hex;
+  const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  const t = Math.min(1, Math.max(0, (alt - 10) / (TOP_ALT - 10))) * .75;
+  const g = rgb[0] * .3 + rgb[1] * .59 + rgb[2] * .11;
+  return `rgb(${rgb.map(v => Math.round(v + (g - v) * t)).join()})`;
+}
+// 「我要的光」：建議時段、未來 7 天、拍攝行程都依這個挑；全部都只挑低角度（≤ LOW_ALT）的晴朗時段
+const WANT = {
+  any: { name: '低角度光', chip: '不限方向', keys: ['front', 'side', 'sideback', 'back'] },
+  front: { name: '順光', chip: '順光', keys: ['front'] },
+  side: { name: '側光', chip: '側光', keys: ['side'] },
+  back: { name: '逆光', chip: '逆光', keys: ['back', 'sideback'] },
+};
+const want = () => WANT[state.opts.want] || WANT.any;
 // 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
 const SUNNY_MIN = .3;
 function drawBands() {
@@ -1036,11 +1059,16 @@ function drawBands() {
   for (let m = 0; m < 1440; m += step) {
     const s = sunAt(m + step / 2);
     let c = state.sv ? classify(s, state.heading) : classifyAlt(s);
-    // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光（灰）；夜間維持深色
+    // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光；夜間維持深色
     if (state.sv && isCovered()) c = { color: TB_INDOOR };
     else if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < SUNNY_MIN || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
-    bctx.fillStyle = cssVar(c.color);
+    bctx.fillStyle = state.sv ? bandColor(c, s.altitude) : cssVar(c.color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
+    // 街景模式：上緣一條細線標出金光（金）與藍調（藍）
+    if (state.sv && !isCovered() && s.altitude >= -6 && s.altitude < 6) {
+      bctx.fillStyle = s.altitude >= -4 ? cssVar('var(--golden)') : cssVar('var(--bluehr)');
+      bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, 3);
+    }
   }
   const t = timesAt();
   bctx.fillStyle = '#fff';
@@ -1051,9 +1079,11 @@ function drawBands() {
   drawSunlit();
   const items = state.sv
     ? (isCovered() ? [[TB_INDOOR, '人工照明（隧道／室內，不受日照影響）']]
-      : [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光']])
+      : [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光'],
+         ['var(--golden)', '金光', 1], ['var(--bluehr)', '藍調', 1]])
     : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
-  $('legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
+  $('legend').innerHTML = items.map(([c, l, line]) => `<span><i style="background:${c}${line ? ';height:3px;border-radius:1px;vertical-align:middle' : ''}"></i>${l}</span>`).join('') +
+    (state.sv && !isCovered() ? '<span>顏色越淡＝太陽越高、光越硬</span>' : '') +
     (state.sv ? (ENABLE_3D ? '<span><i style="background:#fde293;border-radius:1px"></i>細條＝直射陽光</span><span><i style="background:#5f6368;border-radius:1px"></i>被建築遮住</span>' : '') : '');
 }
 
@@ -1873,10 +1903,10 @@ function lightSummary(alt, minutes) {
 function goodRanges(heading, at = state.focus) {
   const good = []; let start = null;
   for (let m = 0; m <= 1440; m += 5) {
-    const k = m < 1440 ? classify(sunAt(m + 2.5, at), heading).key : 'night';   // 取 5 分鐘的中間點，跟時間軸一致
-    const ok = k === 'front' || k === 'side';
+    const s = m < 1440 ? sunAt(m + 2.5, at) : null;   // 取 5 分鐘的中間點，跟時間軸一致
+    const ok = !!s && s.altitude <= LOW_ALT && want().keys.includes(classify(s, heading).key);
     if (ok && start === null) start = m;
-    if (!ok && start !== null) { good.push([start, m]); start = null; }   // 不設最短長度，跟時間軸的綠／黃色段完全一致
+    if (!ok && start !== null) { good.push([start, m]); start = null; }   // 不設最短長度，跟時間軸的色段邊界一致
   }
   return good;
 }
@@ -2129,7 +2159,7 @@ function updateInfo() {
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
     $('svWx').classList.toggle('on', manualWx);
     const diffuse = c.key !== 'night' && wf.direct < SUNNY_MIN;
-    $('badge').querySelector('.dot').style.background = diffuse ? '#9aa0a6' : c.color;
+    $('badge').querySelector('.dot').style.background = diffuse ? TB_SOFT : c.color;
     if (diffuse) {
       // 雲遮住太陽：沒有明顯的順逆光，光線柔和
       $('badgeText').textContent = wf.rain > .05 ? '散射光 · 下雨中' : '散射光 · 光線柔和';
@@ -2154,12 +2184,13 @@ function updateInfo() {
     const good = goodRanges(state.heading), segs = splitByWeather(good).flatMap(x => x.sunny ? splitByShade(x) : [x]), sunny = segs.filter(x => x.sunny);
     const cur = sunny.find(x => now >= x.a && now < x.b);
     const next = sunny.find(x => x.a > now);
-    const tail = !cur && next ? `<br><span class="sub">下一段晴朗順光再 ${fmtDur(next.a - now)}</span>` : '';
-    $('adviceText').innerHTML = (cur ? `現在晴朗順光，到 ${tjump(cur.b)} 結束（還有 ${fmtDur(cur.b - now)}）`
-      : !good.length ? '這個角度今天不會順光，試著轉個方向'
-      : sunny.length === segs.length ? `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}`
-      : sunny.length ? `晴朗又順光：${sunny.map(x => tjump(x.a, x.b)).join('、')}`
-      : `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（預報多雲）</span>`) + tail;
+    const wn = want().name;
+    const tail = !cur && next ? `<br><span class="sub">下一段晴朗${wn}再 ${fmtDur(next.a - now)}</span>` : '';
+    $('adviceText').innerHTML = (cur ? `現在晴朗${wn}，到 ${tjump(cur.b)} 結束（還有 ${fmtDur(cur.b - now)}）`
+      : !good.length ? `這個角度今天沒有${wn}，試著轉個方向`
+      : sunny.length === segs.length ? `這個角度${wn}：${good.map(([a, b]) => tjump(a, b)).join('、')}`
+      : sunny.length ? `晴朗又${wn}：${sunny.map(x => tjump(x.a, x.b)).join('、')}`
+      : `這個角度${wn}：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（預報多雲）</span>`) + tail + wantChips();
     if (isCovered()) {
       // 隧道／室內：資訊改成人工照明的說明
       $('badge').querySelector('.dot').style.background = TB_INDOOR;
@@ -2387,7 +2418,7 @@ function renderListDetail() {
     ${l.items.map(it => `
       <div class="row-btn" data-item="${it.id}" role="button" tabindex="0">
         <span class="list-icon" style="background:${l.color}">${icon(it.heading != null ? 'camera' : 'place', 20)}</span>
-        <span class="t"><div>${esc(it.name)}${it.lat == null ? ' <span style="color:var(--back)">· 未定位</span>' : ''}</div>
+        <span class="t"><div>${esc(it.name)}${it.lat == null ? ' <span style="color:#d93025">· 未定位</span>' : ''}</div>
           <div class="sub">${esc(it.note || it.address || (it.lat != null ? `${it.lat.toFixed(5)}, ${it.lng.toFixed(5)}` : '點一下自動查找位置'))}</div></span>
         <button class="icon-btn del" data-act="delitem" title="移除">${icon('close', 20)}</button>
       </div>`).join('') || '<div class="sub" style="padding:12px 24px">這個清單還是空的。在地點上按「儲存」即可加入。</div>'}
@@ -2401,7 +2432,7 @@ let tripSlots = [];
 function renderTrip(force) {
   const box = $('tripPlan'); if (!box) return;
   const l = Saved.list(state.listId); if (!l) return;
-  const key = [l.id, l.items.length, state.tripDay, [...WX.cache.values()].filter(v => v !== 'loading').length,
+  const key = [l.id, l.items.length, state.tripDay, state.opts.want, [...WX.cache.values()].filter(v => v !== 'loading').length,
     [...BLD.tiles.values()].filter(v => v !== 'loading').length, box.childElementCount].join();
   if (!force && key === tripKey) return;
   tripKey = key;
@@ -2413,7 +2444,7 @@ function renderTrip(force) {
     const p = dayPlan({ lat: it.lat, lng: it.lng }, it.heading, state.tripDay);
     if (p.src === 'loading') { slots.push({ it, loading: true, a: 9999 }); continue; }
     if (p.sunny.length) p.sunny.forEach(x => slots.push({ it, a: x.a, b: x.b, pop: p.pop }));
-    else slots.push({ it, none: true, a: 9998, why: p.good.length ? '順光時段預報多雲或被建築擋住' : '這個方向這天不會順光' });
+    else slots.push({ it, none: true, a: 9998, why: p.good.length ? `${want().name}時段預報多雲或被建築擋住` : `這個方向這天沒有${want().name}` });
   }
   slots.sort((a, b) => a.a - b.a);
   tripSlots = slots;
@@ -2422,7 +2453,7 @@ function renderTrip(force) {
     <div class="trip-days">${days.map((d, i) => `<button class="chip ${d === state.tripDay ? 'on' : ''}" data-tripday="${d}">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</button>`).join('')}</div>
     ${cams.length ? slots.map(x => `<div class="trip-row" data-item="${x.it.id}" data-tripm="${x.a < 9000 ? x.a : ''}" role="button" tabindex="0">
         <span class="tm">${x.loading ? '…' : x.none ? '—' : `${fmtMin(x.a)}<br><span class="sub">–${fmtMin(x.b)}</span>`}</span>
-        <span class="t"><div>${esc(x.it.name)}</div><div class="sub">${x.loading ? '取得天氣中…' : x.none ? x.why : `晴朗順光${x.pop != null ? ` · 降雨 ${x.pop}%` : ''}`}</div></span>
+        <span class="t"><div>${esc(x.it.name)}</div><div class="sub">${x.loading ? '取得天氣中…' : x.none ? x.why : `晴朗${want().name}${x.pop != null ? ` · 降雨 ${x.pop}%` : ''}`}</div></span>
         ${x.a < 9000 ? `<button class="icon-btn trip-cal" title="加到行事曆" data-tripcal="${slots.indexOf(x)}">${icon('calendar', 20)}</button>` : ''}
       </div>`).join('') : ''}
     ${slots.some(x => x.a < 9000) ? `<div style="padding:4px 24px 0"><button class="pill-btn" data-tripcal="all">${icon('calendar', 18)}整天行程加到行事曆</button></div>` : ''}
@@ -2434,7 +2465,7 @@ $('side').addEventListener('click', e => {
     e.stopImmediatePropagation();
     const pick = c.dataset.tripcal === 'all' ? tripSlots.filter(x => x.a < 9000) : [tripSlots[+c.dataset.tripcal]];
     downloadIcs(pick.map(x => ({ date: state.tripDay, a: x.a, b: x.b, lat: x.it.lat, lng: x.it.lng, heading: x.it.heading, place: x.it.name,
-      title: `拍攝：${x.it.name}`, note: `鏡頭朝${dirName(x.it.heading)}，${fmtMin(x.a)}–${fmtMin(x.b)} 晴朗順光` })), `拍攝行程-${state.tripDay}.ics`);
+      title: `拍攝：${x.it.name}`, note: `鏡頭朝${dirName(x.it.heading)}，${fmtMin(x.a)}–${fmtMin(x.b)} 晴朗${want().name}` })), `拍攝行程-${state.tripDay}.ics`);
     return;
   }
   const d = e.target.closest('[data-tripday]');
@@ -2693,7 +2724,7 @@ function renderWeek() {
   const card = $('weekCard'); if (!card.classList.contains('show')) return;
   const at = { ...state.focus }, h = state.heading, today = todayTW();
   // 位置、方向（每 3°）、資料載入進度沒變就不重算
-  const key = [at.lat.toFixed(5), at.lng.toFixed(5), Math.round(h / 3), state.date, today,
+  const key = [at.lat.toFixed(5), at.lng.toFixed(5), Math.round(h / 3), state.date, today, state.opts.want,
     [...WX.cache.values()].filter(v => v !== 'loading').length, [...BLD.tiles.values()].filter(v => v !== 'loading').length].join();
   if (key === weekKey) return;
   weekKey = key;
@@ -2701,15 +2732,15 @@ function renderWeek() {
   for (let i = 0; i < 7; i++) {
     const d = addDays(today, i), p = dayPlan(at, h, d);
     const loading = p.src === 'loading';
-    // 小色條（05:00–20:00）：跟時間軸同色，綠＝順光、黃＝側光，只畫建議時段
+    // 小色條（05:00–20:00）：跟時間軸同色（方向色＋太陽高度深淺），只畫建議時段
     const bar = withCtx({ date: d, focus: at, heading: h }, () => p.sunny.flatMap(x => {
       const out = [];
-      for (let m = x.a; m < x.b; m += 5) out.push(`<i style="left:${(m - 300) / 900 * 100}%;width:${5 / 900 * 100 + .2}%;background:${classify(sunAt(m + 2.5, at), h).key === 'front' ? 'var(--front)' : 'var(--sidelit)'}"></i>`);
+      for (let m = x.a; m < x.b; m += 5) { const s = sunAt(m + 2.5, at); out.push(`<i style="left:${(m - 300) / 900 * 100}%;width:${5 / 900 * 100 + .2}%;background:${bandColor(classify(s, h), s.altitude)}"></i>`); }
       return out;
     })).join('');
     const best = loading ? '<span class="none">取得天氣中…</span>'
       : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
-      : p.good.length ? '<span class="none">順光時段預報多雲或被擋住</span>' : '<span class="none">這個角度不會順光</span>';
+      : p.good.length ? `<span class="none">${want().name}時段預報多雲或被擋住</span>` : `<span class="none">這個角度沒有${want().name}</span>`;
     const meta = [p.pop != null ? `降雨 ${p.pop}%` : p.rainMm >= 1 ? `雨量 ${p.rainMm.toFixed(0)} mm` : '',
       p.sunset ? `夕陽雲量 ${p.sunset.c}%` : '', hazeWord(p.pm)].filter(Boolean).join(' · ');
     const longest = p.sunny.slice().sort((x, y) => (y.b - y.a) - (x.b - x.a))[0];
@@ -2717,16 +2748,24 @@ function renderWeek() {
       <span class="d">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</span><span class="wk-best">${best}${longest ? `<button class="wk-cal" title="加到行事曆" data-cal="${d},${longest.a},${longest.b}">${icon('calendar', 16)}</button>` : ''}</span>
       <span class="wk-bar">${bar}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</div>`);
   }
-  card.innerHTML = `<div class="wk-head">未來 7 天・這個機位的晴朗順光 <span class="sub">（點一天直接切過去）</span></div>` + rows.join('');
+  card.innerHTML = `<div class="wk-head">未來 7 天・這個機位的晴朗${want().name} <span class="sub">（點一天直接切過去）</span></div>` + rows.join('');
 }
 $('svWeek').addEventListener('click', () => { $('weekCard').classList.toggle('show'); $('svWeek').classList.toggle('on', $('weekCard').classList.contains('show')); renderWeek(); });
+// 「我要的光」選擇鈕：放在建議時段下方
+const wantChips = () => `<div class="want-row">${Object.entries(WANT).map(([k, w]) =>
+  `<button data-want="${k}" class="${want() === w ? 'on' : ''}">${w.chip}</button>`).join('')}</div>`;
+$('adviceText').addEventListener('click', e => {
+  const b = e.target.closest('[data-want]'); if (!b) return;
+  state.opts.want = b.dataset.want; lsSet('sunsv.opts', state.opts);
+  render({ bandsToo: true }); renderWeek(); renderTrip();
+});
 $('weekCard').addEventListener('click', e => {
   const c = e.target.closest('[data-cal]');
   if (c) {
     e.stopPropagation();
     const [d, a, b] = c.dataset.cal.split(','), name = $('svTitle').textContent.split(',')[0];
     downloadIcs([{ date: d, a: +a, b: +b, lat: state.focus.lat, lng: state.focus.lng, heading: state.heading, place: name,
-      title: `拍攝：${name}（晴朗順光）`, note: `鏡頭朝${dirName(state.heading)} ${Math.round(state.heading)}°，${fmtMin(+a)}–${fmtMin(+b)} 晴朗順光` }]);
+      title: `拍攝：${name}（晴朗${want().name}）`, note: `鏡頭朝${dirName(state.heading)} ${Math.round(state.heading)}°，${fmtMin(+a)}–${fmtMin(+b)} 晴朗${want().name}` }]);
     return;
   }
   const r = e.target.closest('[data-day]'); if (!r) return;
