@@ -545,7 +545,6 @@
 <nav id="rail">
   <button id="menuBtn" title="選單" data-icon="menu"></button>
   <button class="rail-btn" data-view="saved"><span class="pill" data-icon="bookmark_border"></span>已儲存</button>
-  <button class="rail-btn" data-view="sun"><span class="pill" data-icon="sun"></span>日照</button>
 </nav>
 
 <div id="side">
@@ -571,7 +570,6 @@
 <div id="menu">
   <div class="menu-head"><b>街景日照模擬</b><button class="icon-btn" id="menuClose" title="關閉選單" data-icon="close"></button></div>
   <button class="row-btn" data-menu="saved" data-icon="bookmark_border"><span class="t">已儲存</span></button>
-  <button class="row-btn" data-menu="sun" data-icon="sun"><span class="t">日照資訊</span></button>
   <div class="divider"></div>
   <button class="row-btn" data-menu="import" data-icon="upload"><span class="t">匯入 Google 收藏</span></button>
   <button class="row-btn" data-menu="export" data-icon="download"><span class="t">匯出收藏備份</span></button>
@@ -2723,7 +2721,7 @@ $('menu').addEventListener('click', e => {
   const m = e.target.closest('[data-menu]')?.dataset.menu;
   if (!m) return;
   $('menu').classList.remove('show');
-  if (m === 'saved' || m === 'sun') openSide(m);
+  if (m === 'saved') openSide(m);   // 日照資訊已併入每個地點的面板，不再有獨立入口
   if (m === 'import') openImport();
   if (m === 'export') exportSaved();
   if (m === 'key') { $('keyInput').value = getKey(); $('mapIdInput').value = getMapId(); $('cwaKeyInput').value = CWA.key(); $('keyModal').classList.add('show'); }
