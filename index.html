@@ -333,7 +333,7 @@
   #glow { mix-blend-mode: screen; }
   #rain { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   #wxInfo { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #c4c7c5; margin-top: 2px; }
-  #wxInfo:empty, #svDate:empty { display: none; }
+  #wxInfo:empty, #svDate:empty, #lightInfo:empty { display: none; }
   #svDate.old { color: #fdd663; }
   #svDate { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #9aa0a6; margin-top: 2px; }
   .week-card { display: none; flex-direction: column; gap: 0; padding: 12px 0 8px; max-height: calc(100vh - 560px); min-height: 180px; overflow-y: auto; }
@@ -1252,6 +1252,19 @@ function wxFactors(w) {
 }
 const WMO = c => c === 0 ? '晴' : c === 1 ? '大致晴朗' : c === 2 ? '局部多雲' : c === 3 ? '陰' : c === 45 || c === 48 ? '霧'
   : c >= 51 && c <= 57 ? '毛毛雨' : c >= 61 && c <= 67 ? '雨' : c >= 71 && c <= 77 ? '雪' : c >= 80 && c <= 82 ? '陣雨' : c >= 95 ? '雷雨' : '多雲';
+// 街景資訊卡用的一句話天氣：只講會影響出門與光線的事；霧霾嚴重才提
+function wxShort(w, wf, night) {
+  if (w.src === 'loading') return '正在取得天氣…';
+  if (w.src === 'manual') return `手動天氣：${WX_PRESETS[state.opts.wx].name}`;
+  if (w.src === 'longrange') return `超過 ${WX_FORECAST_DAYS} 天沒有預報，先以晴天模擬`;
+  if (w.src === 'none') return '查不到天氣，以晴天模擬';
+  const base = w.src === 'cwa' ? w.text : wf.rain > .05 || w.precip >= .3 ? '下雨' : w.cloud >= 85 ? '陰天' : w.cloud >= 40 ? '多雲' : '晴朗';
+  const parts = [base];
+  if (!night && base === '多雲' && wf.direct >= SUNNY_MIN && wf.direct < .6) parts.push('陽光時有時無');
+  if (w.pop != null && w.pop >= 30) parts.push(`降雨機率 ${w.pop}%`);
+  if (w.pm25 != null && w.pm25 >= 35) parts.push('遠景灰濛');
+  return parts.join('，');
+}
 function wxText(w) {
   if (w.src === 'loading') return '正在取得天氣預報…';
   const parts = [`${WMO(Math.round(w.code))}`, `雲量 ${Math.round(w.cloud)}%`];
@@ -2072,9 +2085,9 @@ function updateInfo() {
     clearTimeout(weekT); weekT = setTimeout(renderWeek, 250);
     // 照片超過 3 年就提醒：現場的店面、行道樹、工地可能已經不一樣
     const ageY = state.panoDate ? (Date.now() - state.panoDate) / 31557600000 : 0;
-    $('svDate').textContent = state.panoDate ? `街景拍攝於 ${fmtYM(state.panoDate)}${ageY > 3 ? `，已經 ${Math.floor(ageY)} 年，現場可能已改變` : '（最新版本）'}` : '';
+    $('svDate').textContent = state.panoDate && ageY > 3 ? `街景拍攝於 ${fmtYM(state.panoDate)}，已經 ${Math.floor(ageY)} 年，現場可能已改變` : '';
     $('svDate').classList.toggle('old', ageY > 3);
-    $('wxInfo').textContent = wxText(w) + (c.key !== 'night' && wf.direct >= SUNNY_MIN && wf.direct < .6 ? ' · 陽光時有時無' : '');
+    $('wxInfo').textContent = wxShort(w, wf, c.key === 'night');
     const manualWx = state.opts.wx && state.opts.wx !== 'auto';
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
     $('svWx').classList.toggle('on', manualWx);
@@ -2083,11 +2096,11 @@ function updateInfo() {
     if (diffuse) {
       // 雲遮住太陽：沒有明顯的順逆光，光線柔和
       $('badgeText').textContent = wf.rain > .05 ? '散射光 · 下雨中' : '散射光 · 光線柔和';
-      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · 雲層遮住太陽，各方向都能拍`;
+      $('lightInfo').textContent = '雲層遮住太陽，各方向都能拍';
     } else if (c.key === 'night') {
       $('badgeText').textContent = '沒有直射光';
       const mo = moonAt(now);
-      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · ` + (mo.altitude > 0
+      $('lightInfo').textContent = (mo.altitude > 0
         ? `月亮在${dirName(mo.azimuth)}方 ${mo.altitude.toFixed(0)}°（${moonName(mo.phase)} ${Math.round(mo.fraction * 100)}%）`
         : `月亮在地平線下（${moonName(mo.phase)}）`);
     } else {
@@ -2099,7 +2112,7 @@ function updateInfo() {
         : facadeLit ? '<span style="color:#81c995">建築受光</span>' : '<span style="color:#f28b82">建築背光</span>';
       $('badgeText').innerHTML = `${c.label} · ${tag}` + (st?.camShaded && !(fc && fc.lit) ? '' : st?.camShaded ? '<span class="sub">（你站在陰影裡）</span>' : '');
       if (fc && fc.toward && !fc.lit) $('badge').querySelector('.dot').style.background = '#80868b';
-      $('lightInfo').textContent = `${fmtMin(now)} ${ls.name} · 太陽在${where}`;
+      $('lightInfo').textContent = '';
     }
     const good = goodRanges(state.heading), segs = splitByWeather(good).flatMap(x => x.sunny ? splitByShade(x) : [x]), sunny = segs.filter(x => x.sunny);
     const cur = sunny.find(x => now >= x.a && now < x.b);
@@ -2108,13 +2121,13 @@ function updateInfo() {
     $('adviceText').innerHTML = (cur ? `現在晴朗順光，到 ${tjump(cur.b)} 結束（還有 ${fmtDur(cur.b - now)}）`
       : !good.length ? '這個角度今天不會順光，試著轉個方向'
       : sunny.length === segs.length ? `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}`
-      : sunny.length ? `晴朗又順光：${sunny.map(x => tjump(x.a, x.b)).join('、')}<span class="sub">（其餘時段${segs.some(x => x.shade) ? '被建築擋住或' : ''}預報多雲）</span>`
-      : `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（但預報多雲，光線偏柔）</span>`) + tail;
+      : sunny.length ? `晴朗又順光：${sunny.map(x => tjump(x.a, x.b)).join('、')}`
+      : `這個角度順光：${good.map(([a, b]) => tjump(a, b)).join('、')}<span class="sub">（預報多雲）</span>`) + tail;
     if (isCovered()) {
       // 隧道／室內：資訊改成人工照明的說明
       $('badge').querySelector('.dot').style.background = TB_INDOOR;
       $('badgeText').textContent = '人工照明 · 隧道／室內';
-      $('lightInfo').textContent = `${fmtMin(now)} · 不受日照影響，白天晚上亮度相同`;
+      $('lightInfo').textContent = '不受日照影響，白天晚上亮度相同';
       $('wxInfo').textContent = '有頂蓋遮蔽，不受天氣影響';
       $('shadeInfo').textContent = ''; $('shadeInfo').className = '';
       $('adviceText').innerHTML = '照明固定，任何時間拍都一樣<br><span class="sub">靠近出入口時，外面的天光會造成強烈明暗對比</span>';
