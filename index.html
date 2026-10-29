@@ -1558,19 +1558,21 @@ function drawLamps(W, H, v, nightK, wx, base) {
   }
   sctx.restore();
 
-  // 燈頭：亮點＋光暈（雨霧天比較散）
+  // 燈頭：小的暖色亮點＋淡光暈。只畫 40 公尺內的燈頭（更遠的只留地面光），
+  // 避免遠處燈頭在天空變成一顆顆像月亮的白色圓盤
   for (const L of lamps) {
-    if (L.hidden) continue;
+    if (L.hidden || L.d > 40) continue;
     const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
     if (!head) continue;
-    const col = L.sodium ? '255,176,92' : '255,226,192', a = nightK * Math.min(1, 10 / L.d + .25);
-    const r = Math.max(5, Math.min(70, fp * .7 / L.d)) * haze;
+    const col = L.sodium ? '255,176,92' : '255,226,192', near = Math.max(0, 1 - L.d / 40);
+    const a = nightK * (.35 + .65 * near);
+    const core = Math.max(1.5, Math.min(6, fp * .12 / L.d)), r = Math.max(6, Math.min(36, fp * .45 / L.d)) * haze;
     const g = gctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
-    g.addColorStop(0, `rgba(255,252,245,${Math.min(1, a).toFixed(3)})`);
-    g.addColorStop(.1, `rgba(${col},${(a * .8).toFixed(3)})`);
-    g.addColorStop(.4, `rgba(${col},${(a * .18).toFixed(3)})`);
+    g.addColorStop(0, `rgba(${col},${(a * .55).toFixed(3)})`);
     g.addColorStop(1, `rgba(${col},0)`);
     gctx.fillStyle = g; gctx.beginPath(); gctx.arc(head.x, head.y, r, 0, 7); gctx.fill();
+    gctx.fillStyle = `rgba(255,240,215,${Math.min(1, a).toFixed(3)})`;
+    gctx.beginPath(); gctx.arc(head.x, head.y, core, 0, 7); gctx.fill();
   }
 }
 
