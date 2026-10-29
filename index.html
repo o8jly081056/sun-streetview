@@ -304,7 +304,10 @@
   #slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: 3px; border-radius: 50%; background: #fff; border: 2px solid var(--blue); box-shadow: 0 1px 3px rgba(0,0,0,.4); cursor: ew-resize; }
   #slider::-moz-range-track { background: transparent; }
   #slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--blue); }
-  .ticks { display: flex; justify-content: space-between; color: var(--sub); font-size: 11px; line-height: 16px; letter-spacing: .5px; padding: 0 2px; }
+  .ticks { position: relative; height: 16px; color: var(--sub); font-size: 11px; line-height: 16px; letter-spacing: .5px; font-variant-numeric: tabular-nums; }
+  .ticks span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+  .tb-btns .tb-zoom { width: 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
+  .tb-btns .tb-zoom:disabled { opacity: .35; cursor: default; background: none; }
   .tb-btns { display: flex; gap: 2px; flex: none; }
   .tb-btns button { height: 32px; padding: 0 12px; border-radius: 16px; font-size: 14px; color: var(--blue); font-weight: 500; }
   .tb-btns button:hover { background: rgba(0,123,139,.08); }
@@ -477,7 +480,10 @@
     #sideToggle { display: none !important; }
     #timebar, body.dark #timebar, body.side-open #timebar { left: 8px; right: 8px; width: auto; transform: none; min-width: 0; bottom: 8px; padding: 8px 10px; }
     body.side-open:not(.sv) #timebar { display: none; }
-    body.sv #map { width: 120px; height: 90px; left: 8px; bottom: 132px; }
+    /* 手機：滑桿自己一整行，上面一行放播放、時間、縮放鈕 */
+    #timebar .tb-row { justify-content: space-between; }
+    #timebar .tb-slider { order: 3; flex: 1 0 100%; }
+    body.sv #map { width: 120px; height: 90px; left: 8px; bottom: 156px; }
     #svTop { width: calc(100vw - 108px); left: 8px; top: 8px; gap: 6px; }
     .sv-card { padding: 6px 10px 8px 2px; }
     #svTitle { font-size: 14px; line-height: 20px; margin-top: 6px; }
@@ -616,9 +622,11 @@
         <input id="slider" type="range" min="0" max="1439" step="1" value="720" aria-label="時間">
         <div id="scrubTip"></div>
       </div>
-      <div class="ticks"><span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span></div>
+      <div class="ticks" id="ticks"></div>
     </div>
     <div class="tb-btns">
+      <button id="tbOut" class="tb-zoom" title="時間軸縮小（Ctrl＋滾輪也可以）" aria-label="時間軸縮小"></button>
+      <button id="tbIn" class="tb-zoom" title="時間軸放大，看到幾點幾分（Ctrl＋滾輪也可以）" aria-label="時間軸放大"></button>
       <button id="now">現在</button>
     </div>
   </div>
@@ -1058,20 +1066,58 @@ function bandAt(m, heading = state.heading, at = state.focus) {
 }
 // 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
 const SUNNY_MIN = .3;
+// 時間軸可放大：只顯示 tb.v0 起 tb.span 分鐘；預設整天
+const TB_SPANS = [1440, 720, 360, 180, 60];
+const TB_TICK = { 1440: 180, 720: 120, 360: 60, 180: 30, 60: 10 };
+const tb = { span: 1440, v0: 0 };
+const tbClamp = v => Math.max(0, Math.min(1440 - tb.span, v));
+// 目前時間跑出視窗就把視窗挪過去；有挪動回傳 true
+function tbFollow() {
+  const m = state.minutes, old = tb.v0;
+  if (tb.span >= 1440) tb.v0 = 0;
+  else if (m < tb.v0) tb.v0 = tbClamp(m - tb.span * .9);
+  else if (m > tb.v0 + tb.span - 1) tb.v0 = tbClamp(m - tb.span * .1);
+  return tb.v0 !== old;
+}
+function tbZoom(dir, anchorM = state.minutes, frac = null) {
+  const i = Math.max(0, Math.min(TB_SPANS.length - 1, TB_SPANS.indexOf(tb.span) + dir));
+  if (TB_SPANS[i] === tb.span) return;
+  const f = frac ?? (anchorM - tb.v0) / tb.span;
+  tb.span = TB_SPANS[i];
+  tb.v0 = tbClamp(frac == null ? anchorM - tb.span / 2 : anchorM - f * tb.span);
+  drawBands(); updateInfo();
+}
+function drawTicks() {
+  const step = TB_TICK[tb.span], el = $('ticks'); if (!el) return;
+  const out = [];
+  for (let m = Math.ceil(tb.v0 / step) * step; m <= tb.v0 + tb.span; m += step) {
+    const p = (m - tb.v0) / tb.span;
+    const lbl = tb.span >= 720 ? String(m / 60) : fmtMin(m % 1440 === 0 && m ? 1439 : m).replace('23:59', '24:00');
+    out.push(`<span style="left:calc(9px + ${p.toFixed(4)} * (100% - 18px))">${lbl}</span>`);
+  }
+  el.innerHTML = out.join('');
+  $('tbIn').disabled = tb.span === TB_SPANS.at(-1);
+  $('tbOut').disabled = tb.span === TB_SPANS[0];
+  $('slider').min = tb.v0; $('slider').max = Math.min(1439, tb.v0 + tb.span);
+}
 function drawBands() {
   const [W, H] = fitCanvas(bands);
   bctx.clearRect(0, 0, W, H);
-  const step = 5;
-  for (let m = 0; m < 1440; m += step) {
+  tbFollow(); drawTicks();
+  // 跟滑桿圓點對齊：左右各留 9px（圓點半徑）
+  const X = m => 9 + (m - tb.v0) / tb.span * (W - 18);
+  const step = tb.span <= 180 ? 1 : 5;
+  for (let m = Math.floor(tb.v0 / step) * step; m < tb.v0 + tb.span; m += step) {
     const s = sunAt(m + step / 2);
     bctx.fillStyle = state.sv ? bandAt(m + step / 2) : cssVar(classifyAlt(s).color);
-    bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
+    const x0 = m === Math.floor(tb.v0 / step) * step ? 0 : X(m), x1 = m + step >= tb.v0 + tb.span ? W : X(m + step);
+    bctx.fillRect(x0, 0, x1 - x0 + .5, H);
   }
   const t = timesAt();
   bctx.fillStyle = '#fff';
   for (const k of ['sunrise', 'sunset']) {
     const m = (t[k] - msAt(0)) / 60000;
-    if (!isNaN(m)) bctx.fillRect(m / 1440 * W - 1, 0, 2, H);
+    if (!isNaN(m) && m >= tb.v0 && m <= tb.v0 + tb.span) bctx.fillRect(X(m) - 1, 0, 2, H);
   }
   drawSunlit();
   const items = state.sv
@@ -2123,6 +2169,7 @@ function directionsHtml(at) {
 function updateInfo() {
   const s = sunAt(state.minutes);
   $('timeLabel').textContent = fmtMin(state.minutes);
+  if (tbFollow()) drawBands();
   $('slider').value = state.minutes;
   $('date').value = state.date;
   const t = timesAt();
@@ -2254,20 +2301,21 @@ function scrubFactor(e) {
 function showTip(factor) {
   const tip = $('scrubTip'), W = $('slider').clientWidth;
   tip.innerHTML = fmtMin(state.minutes) + (factor < 1 ? `<span class="f">精細 ×${factor === 0.1 ? '1/10' : '1/' + Math.round(1 / factor)}</span>` : '');
-  tip.style.left = (9 + state.minutes / 1439 * (W - 18)) + 'px';
+  tip.style.left = (9 + (state.minutes - tb.v0) / tb.span * (W - 18)) + 'px';
   tip.classList.add('show');
   clearTimeout(scrub.timer);
   if (!scrub.on) scrub.timer = setTimeout(() => tip.classList.remove('show'), 900);
 }
-const minPerPx = () => 1439 / Math.max(1, $('slider').clientWidth - 18);
+const minPerPx = () => tb.span / Math.max(1, $('slider').clientWidth - 18);
+const tbMax = () => Math.min(1439, tb.v0 + tb.span);
 $('timebar').querySelector('.slider-wrap').addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
   e.preventDefault();
   const sl = $('slider'), r = sl.getBoundingClientRect();
-  const thumbX = r.left + 9 + state.minutes / 1439 * (r.width - 18);
+  const thumbX = r.left + 9 + (state.minutes - tb.v0) / tb.span * (r.width - 18);
   // 點在圓點上就直接抓住、不跳動；點在其他地方就跳到那個時間
-  scrub.val = Math.abs(e.clientX - thumbX) <= 14 ? state.minutes : (e.clientX - r.left - 9) * minPerPx();
-  scrub.val = Math.max(0, Math.min(1439, scrub.val));
+  scrub.val = Math.abs(e.clientX - thumbX) <= 14 ? state.minutes : tb.v0 + (e.clientX - r.left - 9) * minPerPx();
+  scrub.val = Math.max(tb.v0, Math.min(tbMax(), scrub.val));
   scrub.lastX = e.clientX; scrub.on = true;
   e.currentTarget.setPointerCapture(e.pointerId);
   sl.focus({ preventScroll: true });
@@ -2276,7 +2324,7 @@ $('timebar').querySelector('.slider-wrap').addEventListener('pointerdown', e => 
 $('timebar').querySelector('.slider-wrap').addEventListener('pointermove', e => {
   if (!scrub.on) return;
   const f = scrubFactor(e);
-  scrub.val = Math.max(0, Math.min(1439, scrub.val + (e.clientX - scrub.lastX) * minPerPx() * f));
+  scrub.val = Math.max(tb.v0, Math.min(tbMax(), scrub.val + (e.clientX - scrub.lastX) * minPerPx() * f));
   scrub.lastX = e.clientX;
   setMinutes(scrub.val); showTip(f);
 });
@@ -2285,6 +2333,15 @@ for (const ev of ['pointerup', 'pointercancel']) $('timebar').querySelector('.sl
 let wheelAcc = 0;
 $('timebar').querySelector('.slider-wrap').addEventListener('wheel', e => {
   e.preventDefault();
+  // Ctrl／⌘＋滾輪、觸控板雙指縮放：以游標位置為中心放大縮小時間軸
+  if (e.ctrlKey || e.metaKey) {
+    wheelAcc += e.deltaY / (e.deltaMode === 1 || Math.abs(e.deltaY) >= 50 ? Math.abs(e.deltaY) : 40);
+    const z = Math.trunc(wheelAcc); if (!z) return;
+    wheelAcc = 0;
+    const r = $('slider').getBoundingClientRect(), f = Math.max(0, Math.min(1, (e.clientX - r.left - 9) / Math.max(1, r.width - 18)));
+    tbZoom(z < 0 ? 1 : -1, tb.v0 + f * tb.span, f);
+    return;
+  }
   const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
   if (e.deltaMode === 1 || Math.abs(d) >= 50) wheelAcc = Math.sign(d);   // 一般滑鼠滾輪：一格一分鐘
   else wheelAcc += d / 6;                                                 // 觸控板：連續滑動
@@ -2359,8 +2416,20 @@ function stopPlay() { clearInterval(playTimer); playTimer = null; $('play').inne
 $('play').addEventListener('click', () => {
   if (playTimer) return stopPlay();
   $('play').innerHTML = icon('pause');
-  playTimer = setInterval(() => setMinutes(state.minutes + 3), 60);
+  // 放大時播慢一點：每格走的分鐘數跟著時間軸範圍縮小
+  playTimer = setInterval(() => setMinutes(state.minutes + Math.max(1, Math.round(3 * tb.span / 1440))), tb.span < 360 ? 120 : 60);
 });
+$('tbIn').innerHTML = icon('add', 20); $('tbOut').innerHTML = icon('remove', 20);
+$('tbIn').addEventListener('click', () => tbZoom(1));
+$('tbOut').addEventListener('click', () => tbZoom(-1));
+// 空白鍵：播放／暫停（街景模式；正在打字時不攔）
+window.addEventListener('keydown', e => {
+  if (e.key !== ' ' || !state.sv) return;
+  const t = e.target;
+  if (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t.tagName === 'INPUT' && t.type !== 'range')) return;
+  e.preventDefault(); e.stopPropagation();
+  if (!e.repeat) $('play').click();
+}, true);
 document.addEventListener('keydown', e => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (e.key === '[') setMinutes(state.minutes - 10);
