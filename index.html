@@ -1987,7 +1987,7 @@ function directionsHtml(at) {
   }).join('');
   return `<div class="sec-title">建築正面何時順光</div>
     <div class="sub" style="padding:0 24px 8px">建築正面朝哪邊就看哪一列：這段時間晴朗又順光。</div>
-    <div class="dir-grid" style="padding-bottom:16px">${rows}</div>`;
+    <div class="dir-grid" style="padding-bottom:8px">${rows}</div>`;
 }
 
 function updateInfo() {
@@ -2747,7 +2747,7 @@ function placeTabHtml(sel) {
 // 時間變動時只重畫日照區塊，照片與營業時間不閃
 function updatePlaceSun() {
   const el = $('pcSun'), sel = state.selection;
-  if (el && sel) el.innerHTML = sunRowsHtml(sel) + nightHtml(sel) + '<div class="divider"></div>' + directionsHtml(sel);
+  if (el && sel) el.innerHTML = sunRowsHtml(sel) + '<div class="divider"></div>' + directionsHtml(sel) + nightHtml(sel);   // 先白天、後夜拍
 }
 function starsHtml(r) {
   return [1, 2, 3, 4, 5].map(i => `<span class="${r >= i - 0.25 ? '' : 'off'}">${icon('star', 14)}</span>`).join('');
@@ -2773,9 +2773,9 @@ function renderSunView() {
     </div>
     <div class="divider"></div>
     ${sunRowsHtml(at)}
-    ${nightHtml(at)}
     <div class="divider"></div>
-    ${directionsHtml(at)}`;
+    ${directionsHtml(at)}
+    ${nightHtml(at)}`;
 }
 
 /* ---------- 3D 建築遮蔽（CesiumJS + Google 3D 圖塊） ---------- */
