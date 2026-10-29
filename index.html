@@ -1374,7 +1374,7 @@ function urbanInfo(at = state.focus) {
   return { urban, litYes, litNo, loading };
 }
 // 附近路燈 [{d 距離公尺, az 方位, h 燈高, sodium}] 與資料來源
-function nearbyLamps(at = state.focus, R = 70) {
+function nearbyLamps(at = state.focus, R = 90) {
   const cy = Math.floor(at.lat * 100), cx = Math.floor(at.lng * 100);
   const mLat = 111320, mLng = 111320 * Math.cos(at.lat * rad);
   const polar = (lat, lng) => { const ny = (lat - at.lat) * mLat, ex = (lng - at.lng) * mLng; return { d: Math.hypot(ex, ny), az: (Math.atan2(ex, ny) / rad + 360) % 360 }; };
@@ -1520,11 +1520,13 @@ function drawLamps(W, H, v, nightK, wx, base) {
 
   sctx.save();
   sctx.globalCompositeOperation = 'lighten';
-  // 都市環境光：地平線以下（街道、一樓店面）稍微亮一點、偏暖
-  const amb = sctx.createLinearGradient(0, hy, 0, H);   // 從地平線以下才開始，不調亮天空
+  // 原則：路燈只會照亮「燈頭以下」的東西（地面、牆面下半、樹、車），所有燈光都裁切在燈頭高度以下，
+  // 天空永遠不會被照亮，就不會出現一顆顆像月亮的亮斑；在這個前提下燈光可以給足
+  // 都市環境光：地平線以下（街道、一樓店面）偏暖地提亮
+  const amb = sctx.createLinearGradient(0, hy, 0, H);
   amb.addColorStop(0, `rgb(${mixc([255, 214, 170], .0)})`);
-  amb.addColorStop(.35, `rgb(${mixc([255, 214, 170], .22 * nightK * urban)})`);
-  amb.addColorStop(1, `rgb(${mixc([255, 214, 170], .12 * nightK * urban)})`);
+  amb.addColorStop(.3, `rgb(${mixc([255, 214, 170], .32 * nightK * urban)})`);
+  amb.addColorStop(1, `rgb(${mixc([255, 214, 170], .18 * nightK * urban)})`);
   sctx.fillStyle = amb; sctx.fillRect(0, 0, W, H);
 
   // 被建築擋住的路燈不畫（燈和鏡頭之間有牆）
@@ -1533,48 +1535,46 @@ function drawLamps(W, H, v, nightK, wx, base) {
   lamps.sort((a, b) => b.d - a.d);
   for (const L of lamps) {
     if (L.hidden) continue;
+    const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
+    if (!head) continue;
     const col = L.sodium ? [255, 176, 92] : [255, 226, 192];
-    const k = nightK * Math.min(1, 1.15 * Math.pow(12 / Math.max(L.d, 6), .55));   // 遠的燈照得比較弱
+    const k = nightK * Math.min(1, 1.3 * Math.pow(14 / Math.max(L.d, 6), .5));   // 遠的燈照得比較弱
     const foot = project(L.az, Math.atan2(-CAM, L.d) / rad, v, W, H);
     const mid = project(L.az, Math.atan2(L.h * .45 - CAM, L.d) / rad, v, W, H);
+    sctx.save(); sctx.beginPath(); sctx.rect(0, head.y, W, H); sctx.clip();   // 只照燈頭以下
     if (foot) {
-      // 地面：路燈照亮直徑約 24 公尺的路面
-      const rx = Math.min(W * 1.2, fp * 12 / L.d * haze), ry = Math.max(rx * .14, Math.min(rx * .7, rx * CAM * 2.2 / L.d));
+      // 地面：路燈照亮直徑約 28 公尺的路面
+      const rx = Math.min(W * 1.2, fp * 14 / L.d * haze), ry = Math.max(rx * .14, Math.min(rx * .7, rx * CAM * 2.2 / L.d));
       sctx.save(); sctx.translate(foot.x, foot.y); sctx.scale(1, ry / rx);
       const g = sctx.createRadialGradient(0, 0, 0, 0, 0, rx);
       g.addColorStop(0, `rgb(${mixc(col, k)})`);
-      g.addColorStop(.45, `rgb(${mixc(col, k * .6)})`);
+      g.addColorStop(.45, `rgb(${mixc(col, k * .62)})`);
       g.addColorStop(1, `rgb(${base})`);
       sctx.fillStyle = g; sctx.beginPath(); sctx.arc(0, 0, rx, 0, 7); sctx.fill(); sctx.restore();
     }
-    // 燈桿周圍的牆面、樹、招牌：只給 25 公尺內的燈，而且只往燈頭以下照。
-    // 遠處的燈若也畫，光圈會跑進照片的白天天空，變成一顆顆像月亮的亮斑
-    // 而且燈的後方 15 公尺內要真的有建築（有牆可以照），空地、公園就不畫
-    const wall = mid && L.d <= 25 && blist.length > 0 && rayHits(0, 0, L.az, L.d + 15, blist).some(h => h.d > L.d - 1);
-    const head = wall ? project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H) : null;
-    if (head) {
-      const r = Math.min(W, fp * 7 / L.d * haze);
-      sctx.save(); sctx.beginPath(); sctx.rect(0, head.y, W, H); sctx.clip();
+    if (mid && L.d <= 50) {
+      // 燈桿周圍的牆面、樹、招牌、車；後方有建築（有牆可照）時較亮
+      const wall = blist.length > 0 && rayHits(0, 0, L.az, L.d + 15, blist).some(h => h.d > L.d - 1);
+      const r = Math.min(W, fp * 8 / L.d * haze);
       const g = sctx.createRadialGradient(mid.x, mid.y, 0, mid.x, mid.y, r);
-      g.addColorStop(0, `rgb(${mixc(col, k * .75)})`);
+      g.addColorStop(0, `rgb(${mixc(col, k * (wall ? .8 : .45))})`);
       g.addColorStop(1, `rgb(${base})`);
       sctx.fillStyle = g; sctx.beginPath(); sctx.arc(mid.x, mid.y, r, 0, 7); sctx.fill();
-      sctx.restore();
     }
+    sctx.restore();
   }
   sctx.restore();
 
-  // 燈頭：小的暖色亮點＋淡光暈。只畫 25 公尺內的燈頭（更遠的只留地面光），
-  // 避免遠處燈頭在天空變成一顆顆像月亮的白色圓盤
+  // 燈頭：暖黃色小光點，越遠越小越淡（遠處就是一排小亮點，不會像月亮）
   for (const L of lamps) {
-    if (L.hidden || L.d > 25) continue;   // 只畫近處燈頭，遠處只留地面光
+    if (L.hidden) continue;
     const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
     if (!head) continue;
-    const col = L.sodium ? '255,176,92' : '255,226,192', near = Math.max(0, 1 - L.d / 40);
-    const a = nightK * (.35 + .65 * near);
-    const core = Math.max(1, Math.min(2.5, fp * .06 / L.d)), r = Math.max(5, Math.min(24, fp * .3 / L.d)) * haze;   // 小小的暖色光點，跟冷白色的月亮區分
+    const col = L.sodium ? '255,176,92' : '255,214,160', near = Math.max(0, 1 - L.d / 90);
+    const a = nightK * (.3 + .7 * near);
+    const core = Math.max(.8, Math.min(2.5, fp * .05 / L.d)), r = Math.max(4, Math.min(20, fp * .25 / L.d)) * haze;
     const g = gctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
-    g.addColorStop(0, `rgba(${col},${(a * .55).toFixed(3)})`);
+    g.addColorStop(0, `rgba(${col},${(a * .5).toFixed(3)})`);
     g.addColorStop(1, `rgba(${col},0)`);
     gctx.fillStyle = g; gctx.beginPath(); gctx.arc(head.x, head.y, r, 0, 7); gctx.fill();
     gctx.fillStyle = `rgba(255,212,150,${Math.min(1, a).toFixed(3)})`;
