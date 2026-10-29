@@ -1032,16 +1032,8 @@ function drawCompass() {
 }
 
 /* ---------- 時間色帶 ---------- */
-const TB_SOFT = '#8fc0a0', TB_INDOOR = '#e6c15a';   // 柔光（陰天、在影子裡，也是好拍的光）、人工照明（隧道／室內）
-// 時間軸上的方向色依太陽高度變淡：10° 以下最飽和，越接近頂光越灰
-function bandColor(c, alt) {
-  const hex = cssVar(c.color);
-  if (!['front', 'side', 'sideback', 'back'].includes(c.key) || !hex.startsWith('#')) return hex;
-  const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
-  const t = Math.min(1, Math.max(0, (alt - 10) / (TOP_ALT - 10))) * .75;
-  const g = rgb[0] * .3 + rgb[1] * .59 + rgb[2] * .11;
-  return `rgb(${rgb.map(v => Math.round(v + (g - v) * t)).join()})`;
-}
+const TB_SOFT = '#9aa0a6', TB_INDOOR = '#e6c15a';   // 柔光（陰天、在影子裡）、人工照明（隧道／室內）
+const SUIT = { good: '#34a853', ok: '#fbbc04', bad: '#ea4335' };
 // 「我要的光」：建議時段、未來 7 天、拍攝行程都依這個挑；全部都只挑低角度（≤ LOW_ALT）的晴朗時段
 const WANT = {
   any: { name: '低角度光', chip: '不限方向', keys: ['front', 'side', 'sideback', 'back'] },
@@ -1050,6 +1042,16 @@ const WANT = {
   back: { name: '逆光', chip: '逆光', keys: ['back', 'sideback'] },
 };
 const want = () => WANT[state.opts.want] || WANT.any;
+// 街景時間軸的適合度（紅黃綠）：綠＝「我要的光」方向＋低角度＋晴朗（跟建議時段完全一致）；
+// 黃＝方向對但太陽偏高；紅＝頂光或方向不對；灰＝陰天或主體在影子裡；夜間維持深色
+function suitAt(m, heading = state.heading, at = state.focus) {
+  if (isCovered()) return { key: 'indoor', color: TB_INDOOR };
+  const s = sunAt(m, at), c = classify(s, heading);
+  if (c.key === 'night') return { key: 'night', color: cssVar('var(--night)') };
+  if (wxFactors(wxAt(m, at)).direct < SUNNY_MIN || subjectShaded(m)) return { key: 'soft', color: TB_SOFT };
+  if (c.key === 'top' || !want().keys.includes(c.key)) return { key: 'bad', color: SUIT.bad };
+  return s.altitude <= LOW_ALT ? { key: 'good', color: SUIT.good } : { key: 'ok', color: SUIT.ok };
+}
 // 直射光低於這個比例就算「柔光」（陰天）：時間軸、建議時段、資訊卡、畫面效果全部用同一個門檻
 const SUNNY_MIN = .3;
 function drawBands() {
@@ -1058,11 +1060,7 @@ function drawBands() {
   const step = 5;
   for (let m = 0; m < 1440; m += step) {
     const s = sunAt(m + step / 2);
-    let c = state.sv ? classify(s, state.heading) : classifyAlt(s);
-    // 街景模式：順光、側光、側逆光、逆光、頂光；陰天或主體被建築擋住改成柔光；夜間維持深色
-    if (state.sv && isCovered()) c = { color: TB_INDOOR };
-    else if (state.sv && c.key !== 'night' && (wxFactors(wxAt(m + step / 2)).direct < SUNNY_MIN || subjectShaded(m + step / 2))) c = { color: TB_SOFT };
-    bctx.fillStyle = state.sv ? bandColor(c, s.altitude) : cssVar(c.color);
+    bctx.fillStyle = state.sv ? suitAt(m + step / 2).color : cssVar(classifyAlt(s).color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
     // 街景模式：上緣一條細線標出金光（金）與藍調（藍）
     if (state.sv && !isCovered() && s.altitude >= -6 && s.altitude < 6) {
@@ -1079,11 +1077,11 @@ function drawBands() {
   drawSunlit();
   const items = state.sv
     ? (isCovered() ? [[TB_INDOOR, '人工照明（隧道／室內，不受日照影響）']]
-      : [['var(--front)', '順光'], ['var(--sidelit)', '側光'], ['var(--sideback)', '側逆光'], ['var(--back)', '逆光'], ['var(--top)', '頂光'], [TB_SOFT, '柔光'],
+      : [[SUIT.good, `適合（${want().name}）`], [SUIT.ok, '普通（太陽偏高）'], [SUIT.bad, '不適合'], [TB_SOFT, '柔光（陰天／影子）'],
          ['var(--golden)', '金光', 1], ['var(--bluehr)', '藍調', 1]])
     : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
   $('legend').innerHTML = items.map(([c, l, line]) => `<span><i style="background:${c}${line ? ';height:3px;border-radius:1px;vertical-align:middle' : ''}"></i>${l}</span>`).join('') +
-    (state.sv && !isCovered() ? '<span>顏色越淡＝太陽越高、光越硬</span>' : '') +
+
     (state.sv ? (ENABLE_3D ? '<span><i style="background:#fde293;border-radius:1px"></i>細條＝直射陽光</span><span><i style="background:#5f6368;border-radius:1px"></i>被建築遮住</span>' : '') : '');
 }
 
@@ -2159,7 +2157,7 @@ function updateInfo() {
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
     $('svWx').classList.toggle('on', manualWx);
     const diffuse = c.key !== 'night' && wf.direct < SUNNY_MIN;
-    $('badge').querySelector('.dot').style.background = diffuse ? TB_SOFT : c.color;
+    $('badge').querySelector('.dot').style.background = suitAt(now).color;
     if (diffuse) {
       // 雲遮住太陽：沒有明顯的順逆光，光線柔和
       $('badgeText').textContent = wf.rain > .05 ? '散射光 · 下雨中' : '散射光 · 光線柔和';
@@ -2178,7 +2176,6 @@ function updateInfo() {
       const tag = fc && fc.toward && !fc.lit ? `<span style="color:#fdd663">建築在別棟的影子裡</span>${fc.estimated ? '<span class="sub">（擋光大樓的高度是推估的）</span>' : ''}`
         : facadeLit ? '<span style="color:#81c995">建築受光</span>' : '<span style="color:#f28b82">建築背光</span>';
       $('badgeText').innerHTML = `${c.label} · ${tag}` + (st?.camShaded && !(fc && fc.lit) ? '' : st?.camShaded ? '<span class="sub">（你站在陰影裡）</span>' : '');
-      if (fc && fc.toward && !fc.lit) $('badge').querySelector('.dot').style.background = '#80868b';
       $('lightInfo').textContent = '';
     }
     const good = goodRanges(state.heading), segs = splitByWeather(good).flatMap(x => x.sunny ? splitByShade(x) : [x]), sunny = segs.filter(x => x.sunny);
@@ -2732,12 +2729,8 @@ function renderWeek() {
   for (let i = 0; i < 7; i++) {
     const d = addDays(today, i), p = dayPlan(at, h, d);
     const loading = p.src === 'loading';
-    // 小色條（05:00–20:00）：跟時間軸同色（方向色＋太陽高度深淺），只畫建議時段
-    const bar = withCtx({ date: d, focus: at, heading: h }, () => p.sunny.flatMap(x => {
-      const out = [];
-      for (let m = x.a; m < x.b; m += 5) { const s = sunAt(m + 2.5, at); out.push(`<i style="left:${(m - 300) / 900 * 100}%;width:${5 / 900 * 100 + .2}%;background:${bandColor(classify(s, h), s.altitude)}"></i>`); }
-      return out;
-    })).join('');
+    // 小色條（05:00–20:00）：只畫建議時段，跟時間軸的綠色段一致
+    const bar = p.sunny.map(x => `<i style="left:${(x.a - 300) / 900 * 100}%;width:${(x.b - x.a) / 900 * 100}%;background:${SUIT.good}"></i>`).join('');
     const best = loading ? '<span class="none">取得天氣中…</span>'
       : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
       : p.good.length ? `<span class="none">${want().name}時段預報多雲或被擋住</span>` : `<span class="none">這個角度沒有${want().name}</span>`;
