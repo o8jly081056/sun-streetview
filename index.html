@@ -1062,11 +1062,6 @@ function drawBands() {
     const s = sunAt(m + step / 2);
     bctx.fillStyle = state.sv ? suitAt(m + step / 2).color : cssVar(classifyAlt(s).color);
     bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, H);
-    // 街景模式：上緣一條細線標出金光（金）與藍調（藍）
-    if (state.sv && !isCovered() && s.altitude >= -6 && s.altitude < 6) {
-      bctx.fillStyle = s.altitude >= -4 ? cssVar('var(--golden)') : cssVar('var(--bluehr)');
-      bctx.fillRect(m / 1440 * W, 0, step / 1440 * W + .5, 3);
-    }
   }
   const t = timesAt();
   bctx.fillStyle = '#fff';
@@ -1077,10 +1072,9 @@ function drawBands() {
   drawSunlit();
   const items = state.sv
     ? (isCovered() ? [[TB_INDOOR, '人工照明（隧道／室內，不受日照影響）']]
-      : [[SUIT.good, `適合（${want().name}）`], [SUIT.ok, '普通（太陽偏高）'], [SUIT.bad, '不適合'], [TB_SOFT, '柔光（陰天／影子）'],
-         ['var(--golden)', '金光', 1], ['var(--bluehr)', '藍調', 1]])
+      : [[SUIT.good, `適合（${want().name}）`], [SUIT.ok, '普通（太陽偏高）'], [SUIT.bad, '不適合'], [TB_SOFT, '柔光（陰天／影子）']])
     : [['var(--day)', '白天'], ['var(--golden)', '金光'], ['var(--bluehr)', '藍調'], ['var(--night)', '夜間']];
-  $('legend').innerHTML = items.map(([c, l, line]) => `<span><i style="background:${c}${line ? ';height:3px;border-radius:1px;vertical-align:middle' : ''}"></i>${l}</span>`).join('') +
+  $('legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
 
     (state.sv ? (ENABLE_3D ? '<span><i style="background:#fde293;border-radius:1px"></i>細條＝直射陽光</span><span><i style="background:#5f6368;border-radius:1px"></i>被建築遮住</span>' : '') : '');
 }
