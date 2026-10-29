@@ -2349,6 +2349,7 @@ $('side').addEventListener('click', e => {
   if (act === 'export') return exportSaved();
   if (act === 'visible' && listEl) { const l = Saved.list(listEl.dataset.list); l.visible = !l.visible; Saved.save(); return; }
   if (act === 'back') return openSide('saved');
+  if (act === 'toplace') return state.selection && openSide('place');
   if (act === 'rename') { const l = Saved.list(state.listId); const n = prompt('清單名稱', l.name); if (n) { l.name = n.trim(); Saved.save(); } return; }
   if (act === 'dellist') {
     const l = Saved.list(state.listId);
@@ -2767,11 +2768,13 @@ function placeRowsHtml(sel) {
 }
 function renderSunView() {
   const at = state.focus;
+  // 標題直接寫是哪個地點的日照；有選地點就能一鍵回到地點資訊
+  const sel = state.selection;
   $('view-sun').innerHTML = `
-    <div class="pad">
-      <h1 class="ptitle">日照</h1>
-      <div class="sub">${state.selection ? esc(state.selection.name) : '地圖中心'} · ${state.date}</div>
-    </div>
+    ${sel ? `<div class="view-head"><button class="icon-btn" data-act="toplace" title="回到地點資訊">${icon('arrow_back')}</button><h2>${esc(sel.name)}</h2></div>
+      <div class="sub" style="padding:0 24px 4px">日照 · ${state.date}</div>`
+    : `<div class="pad"><h1 class="ptitle">地圖中心</h1><div class="sub">日照 · ${state.date}</div>
+      <div class="sub" style="margin-top:6px">點地圖上的地點，就會顯示那個地點的日照</div></div>`}
     <div class="divider"></div>
     ${sunRowsHtml(at)}
     <div class="divider"></div>
