@@ -217,6 +217,17 @@
   body.sv #layerTile { display: none; }
   .gm-btn { width: 40px; height: 40px; background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,.3) 0 1px 4px; display: flex; align-items: center; justify-content: center; color: var(--icon); margin: 0 10px 10px 0; }
   .gm-btn:hover { color: var(--text); }
+  .ctl-stack { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 0 10px 24px 0; }
+  .ctl-btn, .ctl-zoom { width: 40px; background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,.3) 0 1px 4px; overflow: hidden; }
+  .ctl-btn { height: 40px; display: flex; align-items: center; justify-content: center; color: var(--icon); }
+  .ctl-btn:hover, .ctl-zoom button:hover { background: #f1f3f4; color: var(--text); }
+  .ctl-peg { color: #fbbc04; cursor: grab; touch-action: none; }
+  .ctl-peg:hover { color: #f9ab00; }
+  .ctl-zoom button { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: var(--icon); }
+  .ctl-zoom button + button { border-top: 1px solid #e3e3e3; }
+  body.sv .ctl-stack [data-ctl="loc"], body.sv .ctl-peg { display: none; }   /* 街景的小地圖只留縮放 */
+  body.sv .ctl-stack { margin: 0 8px 8px 0; }
+  .peg-ghost { position: fixed; z-index: 50; transform: translate(-50%, -85%); color: #fbbc04; pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
   /* 地圖 API 內建的縮放鈕、街景小人改成現行 Google 地圖的 8px 圓角 */
   #map .gm-bundled-control .gmnoprint > div, #map .gm-svpc { border-radius: 8px !important; box-shadow: rgba(0,0,0,.3) 0 1px 4px !important; overflow: hidden; }
 
@@ -407,7 +418,7 @@
     .act.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
     .act.primary .circle { color: #fff; }
     /* 地圖按鈕：手機用手指縮放，不放 + − 和街景小人；圖層在右上、我的位置在右下且跟著面板高度移動 */
-    #map .gm-bundled-control, #map .gm-svpc, #map .gm-btn { display: none !important; }
+    #map .gm-bundled-control, #map .gm-svpc, #map .gm-btn, #map .ctl-stack { display: none !important; }
     #fabLoc, #mLayers { display: flex; position: fixed; z-index: 9; width: 48px; height: 48px; border-radius: 50%; background: #fff; box-shadow: var(--elev2);
       align-items: center; justify-content: center; color: var(--icon); transition: bottom .25s cubic-bezier(.2,.8,.2,1); }
     #fabLoc { right: 12px; bottom: 24px; }
@@ -669,6 +680,7 @@ const ICONS = {
   download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
   key: 'M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
   add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
+  remove: 'M19 13H5v-2h14v2z',
   edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
   delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
   visibility: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
@@ -3308,7 +3320,7 @@ $('svSave').addEventListener('click', () => {
 window.initMap = async function () {
   $('keyModal').classList.remove('show');
   const { Map, Polyline, Polygon } = await google.maps.importLibrary('maps');
-  const { StreetViewPanorama, StreetViewService } = await google.maps.importLibrary('streetView');
+  const { StreetViewPanorama, StreetViewService, StreetViewCoverageLayer } = await google.maps.importLibrary('streetView');
   const { ControlPosition } = await google.maps.importLibrary('core');
   Marker = makeHtmlMarkerClass();
   try { geocoder = new (await google.maps.importLibrary('geocoding')).Geocoder(); } catch {}
@@ -3316,15 +3328,49 @@ window.initMap = async function () {
 
   map = new Map($('map'), {
     center: state.mapCenter, zoom: state.mapZoom, mapTypeId: state.mapType,
-    mapTypeControl: false, fullscreenControl: false, streetViewControl: true, clickableIcons: true,
-    gestureHandling: 'greedy', zoomControl: true, cameraControl: false, rotateControl: false,
+    mapTypeControl: false, fullscreenControl: false, streetViewControl: false, clickableIcons: true,
+    gestureHandling: 'greedy', zoomControl: false, cameraControl: false, rotateControl: false,
     // 有 Map ID 就用向量地圖：路名、店名用字型即時繪製，跟 Google 地圖網頁一樣；沒有就用點陣圖磚
     ...(getMapId() ? { mapId: getMapId(), renderingType: 'VECTOR' } : {}),
   });
-  const locBtn = document.createElement('button');
-  locBtn.className = 'gm-btn'; locBtn.title = '顯示你的位置'; locBtn.innerHTML = icon('my_location', 20);
-  locBtn.addEventListener('click', locateMe);
-  map.controls[ControlPosition.RIGHT_BOTTOM].push(locBtn);
+  // 右下角控制鈕：我的位置、街景小人、縮放，自己排成一列（間距 8px；API 內建的那組間距無法調整）
+  const stack = document.createElement('div');
+  stack.className = 'ctl-stack';
+  stack.innerHTML = `<button class="ctl-btn" data-ctl="loc" title="顯示你的位置">${icon('my_location', 20)}</button>
+    <button class="ctl-btn ctl-peg" data-ctl="peg" title="拖到地圖上的藍色街道進入街景（點一下：以地圖中心進入）">${icon('streetview', 24)}</button>
+    <div class="ctl-zoom"><button data-ctl="in" title="放大">${icon('add', 20)}</button><button data-ctl="out" title="縮小">${icon('remove', 20)}</button></div>`;
+  map.controls[ControlPosition.RIGHT_BOTTOM].push(stack);
+  stack.addEventListener('click', e => {
+    const c = e.target.closest('[data-ctl]')?.dataset.ctl;
+    if (c === 'loc') locateMe();
+    if (c === 'in') map.setZoom(map.getZoom() + 1);
+    if (c === 'out') map.setZoom(map.getZoom() - 1);
+  });
+  // 街景小人：拖曳時顯示街景覆蓋路線，放開的地方進入街景；只點一下就以地圖中心進入
+  const coverage = new StreetViewCoverageLayer();
+  const proj = new google.maps.OverlayView(); proj.onAdd = proj.draw = proj.onRemove = () => {}; proj.setMap(map);
+  const peg = stack.querySelector('.ctl-peg');
+  peg.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const ghost = document.createElement('div'); ghost.className = 'peg-ghost'; ghost.innerHTML = icon('streetview', 34);
+    let moved = false;
+    const place = ev => { ghost.style.left = ev.clientX + 'px'; ghost.style.top = ev.clientY + 'px'; };
+    const mv = ev => {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 6) return;
+      if (!moved) { moved = true; document.body.appendChild(ghost); coverage.setMap(map); }
+      place(ev);
+    };
+    const up = ev => {
+      removeEventListener('pointermove', mv); removeEventListener('pointerup', up);
+      ghost.remove(); coverage.setMap(null);
+      if (!moved) { const c = map.getCenter(); enterStreetView({ lat: c.lat(), lng: c.lng() }); return; }
+      const box = $('map').getBoundingClientRect(), pr = proj.getProjection();
+      if (!pr || ev.clientX < box.left || ev.clientX > box.right || ev.clientY < box.top || ev.clientY > box.bottom) return;
+      const ll = pr.fromContainerPixelToLatLng(new google.maps.Point(ev.clientX - box.left, ev.clientY - box.top + 14));
+      enterStreetView({ lat: ll.lat(), lng: ll.lng() });
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
 
   pano = new StreetViewPanorama($('pano'), {
     visible: false, pov: { heading: state.heading, pitch: state.pitch }, zoom: state.zoom,
