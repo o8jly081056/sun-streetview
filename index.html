@@ -1528,6 +1528,21 @@ function drawLamps(W, H, v, nightK, wx, base) {
   amb.addColorStop(.3, `rgb(${mixc([255, 214, 170], .32 * nightK * urban)})`);
   amb.addColorStop(1, `rgb(${mixc([255, 214, 170], .18 * nightK * urban)})`);
   sctx.fillStyle = amb; sctx.fillRect(0, 0, W, H);
+  // 街道基礎照明：市區的路面本來就被路燈、號誌、騎樓與招牌均勻照亮（這些沒有資料）。
+  // 在鏡頭周圍的路面加一層底光，十字路口（可往 3 個以上方向走）再加亮；只照地平線以下
+  const cross = (pano?.getLinks?.() || []).length >= 3;
+  const streetK = nightK * urban * (cross ? .62 : .42);
+  if (streetK > .02 && hy < H) {
+    sctx.save(); sctx.beginPath(); sctx.rect(0, hy, W, H - hy); sctx.clip();
+    const cx = W / 2, cy = H + H * .1, rx = W * .9, ry = Math.max(40, (H - hy) * 1.25);
+    sctx.translate(cx, cy); sctx.scale(1, ry / rx);
+    const g = sctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgb(${mixc([255, 238, 214], streetK)})`);
+    g.addColorStop(.55, `rgb(${mixc([255, 238, 214], streetK * .7)})`);
+    g.addColorStop(1, `rgb(${mixc([255, 238, 214], streetK * .25)})`);
+    sctx.fillStyle = g; sctx.beginPath(); sctx.arc(0, 0, rx, 0, 7); sctx.fill();
+    sctx.restore();
+  }
 
   // 被建築擋住的路燈不畫（燈和鏡頭之間有牆）
   const blist = bldLocal() || [];
