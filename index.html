@@ -1,6 +1,14 @@
 <!doctype html>
 <html lang="zh-TW">
 <head>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#007b8b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="日照街景">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -281,6 +289,7 @@
   #rain { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   #wxInfo { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #c4c7c5; margin-top: 2px; }
   #wxInfo:empty, #svDate:empty { display: none; }
+  #svDate.old { color: #fdd663; }
   #svDate { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #9aa0a6; margin-top: 2px; }
   .week-card { display: none; flex-direction: column; gap: 0; padding: 12px 0 8px; max-height: calc(100vh - 560px); min-height: 180px; overflow-y: auto; }
   .week-card:not(.show) { display: none !important; }
@@ -290,6 +299,10 @@
   .wk-row { display: grid; grid-template-columns: 78px 1fr; gap: 2px 10px; padding: 8px 16px; text-align: left; width: 100%; color: #e8eaed; font-size: 13px; line-height: 18px; }
   .wk-row:hover, .wk-row.on { background: rgba(255,255,255,.08); }
   .wk-row .d { color: #fff; font-weight: 500; }
+  .wk-row { cursor: pointer; }
+  .wk-best { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+  .wk-cal { flex: none; color: var(--dark-accent); width: 26px; height: 26px; margin: -4px -6px -4px 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .wk-cal:hover { background: rgba(127,211,224,.15); }
   .wk-row .best { color: var(--dark-accent); }
   .wk-row .meta { grid-column: 2; color: #bdc1c6; font-size: 12px; }
   .wk-row .none { color: #9aa0a6; }
@@ -415,7 +428,7 @@
     .sv-card { padding: 6px 10px 8px 2px; }
     #svTitle { font-size: 14px; line-height: 20px; margin-top: 6px; }
     #adviceText { font-size: 13px; line-height: 18px; margin-top: 4px; }
-    #svDate { display: none; }
+    #svDate:not(.old) { display: none; }
     /* 按鈕列改成一排、可左右滑動，延伸到螢幕右邊 */
     .sv-chips { flex-wrap: nowrap; overflow-x: auto; width: calc(100vw - 16px); scrollbar-width: none; padding-bottom: 2px; }
     .sv-chips::-webkit-scrollbar { display: none; }
@@ -619,6 +632,8 @@
 /* ---------- 圖示（Material Icons 路徑） ---------- */
 // 3D 建築遮蔽先關閉：不在背景載入 3D 圖塊（最貴的 API），也藏起相關按鈕；改成 true 即可恢復
 const ENABLE_3D = false;
+// 手機加到主畫面後能離線開啟（本機開發時不註冊，避免快取舊版）
+if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator.serviceWorker.register('sw.js').catch(() => {});
 if (!ENABLE_3D) document.body.classList.add('no3d');
 const ICONS = {
   menu: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
@@ -643,6 +658,7 @@ const ICONS = {
   cube: 'M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.991.991 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15 6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z',
   layers: 'M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z',
   play: 'M8 5v14l11-7z',
+  calendar: 'M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v5h-5z',
   cloud: 'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z',
   phone: 'M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z',
   web: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.93 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 0 1 5.08 16zm2.95-8H5.08a7.99 7.99 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z',
@@ -1141,7 +1157,32 @@ function cwaAt(ms, at = state.focus) {
 }
 
 // 某分鐘的天氣：手動模式用預設值，自動模式在前後兩個整點之間內插
+/* 空氣品質（Open-Meteo，免金鑰）：PM2.5 高時遠景灰濛濛，拍天際線、遠山要注意 */
+const AQ = { cache: new Map() };
+function ensureAQ(at = state.focus, date = state.date) {
+  const k = wxKey(at, date);
+  if (AQ.cache.has(k)) return;
+  AQ.cache.set(k, 'loading');
+  fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${at.lat.toFixed(3)}&longitude=${at.lng.toFixed(3)}&hourly=pm2_5&timezone=Asia%2FTaipei&start_date=${date}&end_date=${date}`)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(j => { const a = j.hourly?.pm2_5; AQ.cache.set(k, Array.isArray(a) && a.some(v => v != null) ? a : 'none'); render({ bandsToo: true }); })
+    .catch(() => AQ.cache.set(k, 'none'));
+}
+function pm25At(minutes = state.minutes, at = state.focus) {
+  ensureAQ(at);
+  const a = AQ.cache.get(wxKey(at, state.date));
+  if (!Array.isArray(a)) return null;
+  const i = Math.min(23, Math.floor(minutes / 60)), j = Math.min(23, i + 1), t = (minutes % 60) / 60;
+  if (a[i] == null) return null;
+  return a[i] + ((a[j] ?? a[i]) - a[i]) * t;
+}
+const hazeWord = pm => pm == null ? '' : pm < 15 ? '遠景清楚' : pm < 35 ? '遠景略霧' : '遠景灰濛';
 function wxAt(minutes = state.minutes, at = state.focus) {
+  const w = wxAtRaw(minutes, at);
+  if (w.src !== 'manual') w.pm25 = pm25At(minutes, at);
+  return w;
+}
+function wxAtRaw(minutes = state.minutes, at = state.focus) {
   const mode = state.opts.wx || 'auto';
   if (mode !== 'auto') return { ...WX_PRESETS[mode], src: 'manual' };
   if (dayDiff(state.date, todayTW()) >= 0) { const c = cwaAt(msAt(minutes), at); if (c) return c; }
@@ -1159,7 +1200,8 @@ function wxFactors(w) {
   let direct = Math.pow(1 - cover, 1.4);
   if (w.precip > .2) direct *= .2;
   const fog = Math.max(0, Math.min(1, 1 - (w.vis - 500) / 9500));
-  return { cover, rain, fog, direct };
+  const haze = w.pm25 == null ? 0 : Math.max(0, Math.min(1, (w.pm25 - 15) / 55));   // PM2.5 15 以下清楚、70 以上很霧
+  return { cover, rain, fog, direct, haze };
 }
 const WMO = c => c === 0 ? '晴' : c === 1 ? '大致晴朗' : c === 2 ? '局部多雲' : c === 3 ? '陰' : c === 45 || c === 48 ? '霧'
   : c >= 51 && c <= 57 ? '毛毛雨' : c >= 61 && c <= 67 ? '雨' : c >= 71 && c <= 77 ? '雪' : c >= 80 && c <= 82 ? '陣雨' : c >= 95 ? '雷雨' : '多雲';
@@ -1172,6 +1214,7 @@ function wxText(w) {
   if (w.src === 'cwa') return `氣象署${w.span === 3 ? '' : '一週'}預報（${w.town}）${w.text}${w.pop != null ? ` · 降雨機率 ${w.pop}%` : ''}`;
   if (w.src === 'longrange') return `超過 ${WX_FORECAST_DAYS} 天沒有可靠預報，先以晴天模擬`;
   if (w.src === 'none') return '查不到這天的天氣，以晴天模擬';
+  if (w.pm25 != null) parts.push(`PM2.5 ${Math.round(w.pm25)}（${hazeWord(w.pm25)}）`);
   return `${w.src === 'actual' ? '實際天氣' : '預報'} ${parts.join(' · ')}`;
 }
 
@@ -1341,7 +1384,7 @@ function bldLocal(at = state.focus, R = 320) {
         const [xi, yi] = pts[i], [xj, yj] = pts[j];
         if ((yi > 0) !== (yj > 0) && 0 < (xj - xi) * (0 - yi) / (yj - yi) + xi) inside = !inside;
       }
-      if (!inside) list.push({ h, pts });
+      if (!inside) list.push({ h, pts, est: !b[0] });   // est＝高度是推估的
     }
   }
   BLD.key = key; BLD.local = list;
@@ -1367,9 +1410,10 @@ function rayHits(ox, oy, az, maxD, list) {
   return hits.sort((a, b) => a.d - b.d);
 }
 // 離地 z 公尺的一點，往太陽方向看會不會被建築擋住
+// 回傳擋住太陽的那棟建築（有被擋就是真值），沒被擋回傳 false
 function sunBlockedAt(ox, oy, z, az, alt, list, skip) {
   if (alt <= 0) return true;
-  for (const h of rayHits(ox, oy, az, 450, list)) if (h.b !== skip && Math.atan2(h.h - z, h.d) / rad > alt) return true;
+  for (const h of rayHits(ox, oy, az, 450, list)) if (h.b !== skip && Math.atan2(h.h - z, h.d) / rad > alt) return h.b;
   return false;
 }
 // 某時刻：鏡頭位置是否在建築陰影中、鏡頭正前方那面建築立面是否照到太陽
@@ -1386,7 +1430,8 @@ function shadeState(minutes = state.minutes, heading = state.heading) {
     const faceAz = (Math.atan2(front.nx, front.ny) / rad + 360) % 360;
     const toward = Math.abs(norm180(s.azimuth - faceAz)) < 88;
     const z = Math.min(front.h * .4, 12);
-    facade = { d: front.d, faceAz, toward, lit: toward && !sunBlockedAt(px, py, z, s.azimuth, s.altitude, list, front.b) };
+    const blocker = toward && sunBlockedAt(px, py, z, s.azimuth, s.altitude, list, front.b);
+    facade = { d: front.d, faceAz, toward, lit: toward && !blocker, estimated: !!(blocker && blocker.est) };
   }
   return { camShaded, facade };
 }
@@ -1525,7 +1570,8 @@ function drawLight() {
   let [, br, ct, sat, warm, base] = gradeAt(alt);
   // 天氣：雲越厚，反差、飽和、暖色越低，底色往冷灰靠；下雨再壓暗、偏冷
   const wx = wxFactors(wxAt()), day = Math.max(0, Math.min(1, (alt + 4) / 10));
-  ct *= 1 - .2 * wx.cover * day - .08 * wx.fog;
+  ct *= 1 - .2 * wx.cover * day - .08 * wx.fog - .14 * wx.haze * day;
+  sat *= 1 - .15 * wx.haze * day;
   sat *= 1 - (.32 * wx.cover + .15 * wx.rain) * day - .2 * wx.fog;
   warm *= wx.direct;
   br *= 1 - (.1 * wx.cover + .14 * wx.rain) * day;
@@ -1695,6 +1741,13 @@ function drawSkyAndFog(W, H, v, wx, day) {
   const hz = project(v.heading, 0, v, W, H);
   const hy = hz ? hz.y : H / 2;
   // 照片原本是晴天拍的、有硬影子；陰天時用濾色把暗部提亮，影子變淡、反差變柔
+  // 霾：地平線附近一層偏暖的灰，越遠越看不清
+  if (wx.haze > .02) {
+    const hz0 = project(v.heading, 0, v, W, H), hy0 = hz0 ? hz0.y : H / 2, a = wx.haze * .45 * Math.max(.3, day);
+    const g = gctx.createLinearGradient(0, hy0 - H * .35, 0, hy0 + H * .2);
+    g.addColorStop(0, 'rgba(206,200,188,0)'); g.addColorStop(.6, `rgba(206,200,188,${a.toFixed(3)})`); g.addColorStop(1, `rgba(206,200,188,${(a * .4).toFixed(3)})`);
+    gctx.fillStyle = g; gctx.fillRect(0, 0, W, H);
+  }
   const lift = Math.max(0, wx.cover - .3) * .2 * day;
   if (lift > .01) { gctx.fillStyle = `rgba(150,156,165,${lift.toFixed(3)})`; gctx.fillRect(0, 0, W, H); }
   const skyA = (.28 * wx.cover + .1 * wx.rain) * day;
@@ -1743,6 +1796,29 @@ function splitByWeather(ranges, at = state.focus) {
   }
   return out;
 }
+/* ---------- 加到行事曆（.ics）：手機點了會直接匯入行事曆，開始前 1 小時提醒 ---------- */
+function icsTime(date, minutes) {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + minutes * 60000 - TZ * 3600e3).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+}
+const icsEsc = t => String(t).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\n/g, '\\n');
+function downloadIcs(events, filename = '拍攝計畫.ics') {
+  const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const body = events.map((e, i) => [
+    'BEGIN:VEVENT', `UID:${Date.now()}-${i}@sun-streetview`, `DTSTAMP:${now}`,
+    `DTSTART:${icsTime(e.date, e.a)}`, `DTEND:${icsTime(e.date, e.b)}`,
+    `SUMMARY:${icsEsc(e.title)}`, `LOCATION:${icsEsc(e.place || `${e.lat.toFixed(5)},${e.lng.toFixed(5)}`)}`,
+    `GEO:${e.lat.toFixed(5)};${e.lng.toFixed(5)}`, `DESCRIPTION:${icsEsc(e.note || '')}`,
+    `URL:${location.origin + location.pathname}#lat=${e.lat.toFixed(6)}&lng=${e.lng.toFixed(6)}&z=18&d=${e.date}&t=${e.a}${e.heading != null ? `&sv=1&h=${e.heading.toFixed(1)}&p=5&f=1` : ''}`,
+    'BEGIN:VALARM', 'TRIGGER:-PT60M', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(e.title)}`, 'END:VALARM', 'END:VEVENT'].join('\r\n')).join('\r\n');
+  const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//sun-streetview//TW\r\nCALSCALE:GREGORIAN\r\n${body}\r\nEND:VCALENDAR\r\n`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(events.length > 1 ? `已產生 ${events.length} 個行事曆項目` : '已產生行事曆項目，開始前 1 小時提醒');
+}
+
 /* ---------- 規劃：任意日期、地點、鏡頭方向 ---------- */
 // 暫時切換日期／地點／方向來計算（同步執行完就換回來，畫面不受影響）
 function withCtx(ctx, fn) {
@@ -1764,7 +1840,9 @@ function dayPlan(at, heading, date) {
     let pop = null, rainMm = 0;
     for (let m = 360; m <= 1140; m += 60) { const w = wxAt(m, at); if (w.pop != null) pop = Math.max(pop ?? 0, w.pop); rainMm += w.precip || 0; }
     const w0 = wxAt(720, at);
-    return { date, good, sunny, pop, rainMm, src: w0.src, sunset: ge ? cloudAt(ge, at) : null, minutes: sunny.reduce((n, x) => n + x.b - x.a, 0) };
+    ensureAQ(at, date);
+    let pmSum = 0, pmN = 0; for (let m = 480; m <= 1020; m += 60) { const v = pm25At(m, at); if (v != null) { pmSum += v; pmN++; } }
+    return { date, good, sunny, pop, rainMm, src: w0.src, pm: pmN ? pmSum / pmN : null, sunset: ge ? cloudAt(ge, at) : null, minutes: sunny.reduce((n, x) => n + x.b - x.a, 0) };
   });
 }
 
@@ -1907,7 +1985,10 @@ function updateInfo() {
     ensureWeather();
     const w = wxAt(), wf = wxFactors(w);
     clearTimeout(weekT); weekT = setTimeout(renderWeek, 250);
-    $('svDate').textContent = state.panoDate ? `街景拍攝於 ${fmtYM(state.panoDate)}（最新版本）` : '';
+    // 照片超過 3 年就提醒：現場的店面、行道樹、工地可能已經不一樣
+    const ageY = state.panoDate ? (Date.now() - state.panoDate) / 31557600000 : 0;
+    $('svDate').textContent = state.panoDate ? `街景拍攝於 ${fmtYM(state.panoDate)}${ageY > 3 ? `，已經 ${Math.floor(ageY)} 年，現場可能已改變` : '（最新版本）'}` : '';
+    $('svDate').classList.toggle('old', ageY > 3);
     $('wxInfo').textContent = wxText(w) + (c.key !== 'night' && wf.direct >= SUNNY_MIN && wf.direct < .6 ? ' · 陽光時有時無' : '');
     const manualWx = state.opts.wx && state.opts.wx !== 'auto';
     $('svWxLbl').textContent = `天氣：${manualWx ? WX_PRESETS[state.opts.wx].name + '（手動）' : '自動'}`;
@@ -1929,7 +2010,7 @@ function updateInfo() {
       const where = ar < 3 ? '正前方' : ar > 177 ? '正後方' : `${rel < 0 ? '左' : '右'}${ar < 90 ? '前' : '後'}方`;
       const st = shadeState(now), fc = st?.facade;
       const facadeLit = fc ? fc.lit : Math.abs(norm180(s.azimuth - (state.heading + 180))) < 90;
-      const tag = fc && fc.toward && !fc.lit ? '<span style="color:#fdd663">建築在別棟的影子裡</span>'
+      const tag = fc && fc.toward && !fc.lit ? `<span style="color:#fdd663">建築在別棟的影子裡</span>${fc.estimated ? '<span class="sub">（擋光大樓的高度是推估的）</span>' : ''}`
         : facadeLit ? '<span style="color:#81c995">建築受光</span>' : '<span style="color:#f28b82">建築背光</span>';
       $('badgeText').innerHTML = `${c.label} · ${tag}` + (st?.camShaded && !(fc && fc.lit) ? '' : st?.camShaded ? '<span class="sub">（你站在陰影裡）</span>' : '');
       if (fc && fc.toward && !fc.lit) $('badge').querySelector('.dot').style.background = '#80868b';
@@ -2181,6 +2262,7 @@ function renderListDetail() {
 // 拍攝行程：清單裡每個機位在選定那天的晴朗順光時段，依時間排成一條路線
 state.tripDay = state.tripDay || todayTW();
 let tripKey = '';
+let tripSlots = [];
 function renderTrip(force) {
   const box = $('tripPlan'); if (!box) return;
   const l = Saved.list(state.listId); if (!l) return;
@@ -2199,16 +2281,27 @@ function renderTrip(force) {
     else slots.push({ it, none: true, a: 9998, why: p.good.length ? '順光時段預報多雲或被建築擋住' : '這個方向這天不會順光' });
   }
   slots.sort((a, b) => a.a - b.a);
+  tripSlots = slots;
   box.innerHTML = `
     <div class="sec-title">拍攝行程</div>
     <div class="trip-days">${days.map((d, i) => `<button class="chip ${d === state.tripDay ? 'on' : ''}" data-tripday="${d}">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</button>`).join('')}</div>
     ${cams.length ? slots.map(x => `<div class="trip-row" data-item="${x.it.id}" data-tripm="${x.a < 9000 ? x.a : ''}" role="button" tabindex="0">
         <span class="tm">${x.loading ? '…' : x.none ? '—' : `${fmtMin(x.a)}<br><span class="sub">–${fmtMin(x.b)}</span>`}</span>
         <span class="t"><div>${esc(x.it.name)}</div><div class="sub">${x.loading ? '取得天氣中…' : x.none ? x.why : `晴朗順光${x.pop != null ? ` · 降雨 ${x.pop}%` : ''}`}</div></span>
+        ${x.a < 9000 ? `<button class="icon-btn trip-cal" title="加到行事曆" data-tripcal="${slots.indexOf(x)}">${icon('calendar', 20)}</button>` : ''}
       </div>`).join('') : ''}
+    ${slots.some(x => x.a < 9000) ? `<div style="padding:4px 24px 0"><button class="pill-btn" data-tripcal="all">${icon('calendar', 18)}整天行程加到行事曆</button></div>` : ''}
     <div class="sub" style="padding:4px 24px 16px">${cams.length ? '依時間排序，點一列直接打開那個機位與時間。' : ''}${places.length ? `${cams.length ? '<br>' : ''}有 ${places.length} 個地點沒有鏡頭方向，無法排進行程：在街景裡對好角度後按「儲存此機位」。` : ''}</div>`;
 }
 $('side').addEventListener('click', e => {
+  const c = e.target.closest('[data-tripcal]');
+  if (c) {
+    e.stopImmediatePropagation();
+    const pick = c.dataset.tripcal === 'all' ? tripSlots.filter(x => x.a < 9000) : [tripSlots[+c.dataset.tripcal]];
+    downloadIcs(pick.map(x => ({ date: state.tripDay, a: x.a, b: x.b, lat: x.it.lat, lng: x.it.lng, heading: x.it.heading, place: x.it.name,
+      title: `拍攝：${x.it.name}`, note: `鏡頭朝${dirName(x.it.heading)}，${fmtMin(x.a)}–${fmtMin(x.b)} 晴朗順光` })), `拍攝行程-${state.tripDay}.ics`);
+    return;
+  }
   const d = e.target.closest('[data-tripday]');
   if (d) { state.tripDay = d.dataset.tripday; renderTrip(true); return; }
   const r = e.target.closest('.trip-row');
@@ -2482,15 +2575,24 @@ function renderWeek() {
       : p.sunny.length ? `<span class="best">${p.sunny.map(x => `${fmtMin(x.a)}–${fmtMin(x.b)}`).join('、')}</span>`
       : p.good.length ? '<span class="none">順光時段預報多雲或被擋住</span>' : '<span class="none">這個角度不會順光</span>';
     const meta = [p.pop != null ? `降雨 ${p.pop}%` : p.rainMm >= 1 ? `雨量 ${p.rainMm.toFixed(0)} mm` : '',
-      p.sunset ? `夕陽雲量 ${p.sunset.c}%` : ''].filter(Boolean).join(' · ');
-    rows.push(`<button class="wk-row ${d === state.date ? 'on' : ''}" data-day="${d}" data-m="${p.sunny[0]?.a ?? ''}">
-      <span class="d">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</span><span>${best}</span>
-      <span class="wk-bar">${bar}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</button>`);
+      p.sunset ? `夕陽雲量 ${p.sunset.c}%` : '', hazeWord(p.pm)].filter(Boolean).join(' · ');
+    const longest = p.sunny.slice().sort((x, y) => (y.b - y.a) - (x.b - x.a))[0];
+    rows.push(`<div class="wk-row ${d === state.date ? 'on' : ''}" role="button" tabindex="0" data-day="${d}" data-m="${p.sunny[0]?.a ?? ''}">
+      <span class="d">${i === 0 ? '今天' : i === 1 ? '明天' : fmtDay(d)}</span><span class="wk-best">${best}${longest ? `<button class="wk-cal" title="加到行事曆" data-cal="${d},${longest.a},${longest.b}">${icon('calendar', 16)}</button>` : ''}</span>
+      <span class="wk-bar">${bar}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</div>`);
   }
   card.innerHTML = `<div class="wk-head">未來 7 天・這個機位的晴朗順光 <span class="sub">（點一天直接切過去）</span></div>` + rows.join('');
 }
 $('svWeek').addEventListener('click', () => { $('weekCard').classList.toggle('show'); $('svWeek').classList.toggle('on', $('weekCard').classList.contains('show')); renderWeek(); });
 $('weekCard').addEventListener('click', e => {
+  const c = e.target.closest('[data-cal]');
+  if (c) {
+    e.stopPropagation();
+    const [d, a, b] = c.dataset.cal.split(','), name = $('svTitle').textContent.split(',')[0];
+    downloadIcs([{ date: d, a: +a, b: +b, lat: state.focus.lat, lng: state.focus.lng, heading: state.heading, place: name,
+      title: `拍攝：${name}（晴朗順光）`, note: `鏡頭朝${dirName(state.heading)} ${Math.round(state.heading)}°，${fmtMin(+a)}–${fmtMin(+b)} 晴朗順光` }]);
+    return;
+  }
   const r = e.target.closest('[data-day]'); if (!r) return;
   state.date = r.dataset.day; setLive(false);
   if (r.dataset.m) state.minutes = +r.dataset.m;
