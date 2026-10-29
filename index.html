@@ -330,7 +330,6 @@
   #pano { transition: filter .25s; }
   #shade, #glow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   #shade { mix-blend-mode: multiply; }
-  #nsky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   #glow { mix-blend-mode: screen; }
   #rain { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
   #wxInfo { font-size: 12px; line-height: 16px; letter-spacing: .2px; color: #c4c7c5; margin-top: 2px; }
@@ -496,7 +495,6 @@
 <div id="pano-wrap">
   <div id="pano"></div>
   <canvas id="shade"></canvas>
-  <canvas id="nsky"></canvas>
   <canvas id="glow"></canvas>
   <canvas id="rain"></canvas>
   <canvas id="overlay"></canvas>
@@ -1621,75 +1619,10 @@ function isCovered(at = state.focus) {
 }
 
 const shadeC = $('shade'), sctx = shadeC.getContext('2d');
-const nskyC = $('nsky'), nctx = nskyC.getContext('2d');
-
-/* ---------- 夜空替換：街景照片的天空是白天的，天黑後把「建築天際線以上」換成真正的夜空 ---------- */
-// 天際線：每 1° 方位，往外看最高的建築頂端仰角（用 OpenStreetMap 建築輪廓與高度；沒有建築的方向當作地平線）
-const SKY = { key: '', line: null };
-function skyline() {
-  const list = bldLocal();
-  if (!list) return null;
-  const key = BLD.key + '|' + list.length;
-  if (SKY.key === key) return SKY.line;
-  const line = new Float32Array(360);
-  for (let az = 0; az < 360; az++) {
-    let el = 0;
-    for (const h of rayHits(0, 0, az, 400, list)) el = Math.max(el, Math.atan2(h.h - 2.5, h.d) / rad);
-    line[az] = el;
-  }
-  // 相鄰方位取較高值、稍微平滑，避免細縫
-  const sm = new Float32Array(360);
-  for (let i = 0; i < 360; i++) sm[i] = Math.max(line[i], (line[(i + 359) % 360] + line[(i + 1) % 360]) / 2);
-  SKY.key = key; SKY.line = sm;
-  return sm;
-}
-const skyEl = (line, az) => { const a = ((az % 360) + 360) % 360, i = Math.floor(a), t = a - i; return line[i] * (1 - t) + line[(i + 1) % 360] * t; };
-// 星星：固定的亂數位置（天球座標），晴朗、無月光、光害少才看得到
-const STARS = Array.from({ length: 260 }, (_, i) => { const r = Math.sin(i * 12.9898) * 43758.5453; const f = r - Math.floor(r);
-  const r2 = Math.sin(i * 78.233) * 12543.123; const g = r2 - Math.floor(r2); return { az: f * 360, el: 8 + Math.pow(g, .7) * 80, m: (i * 7919 % 100) / 100 }; });
-function drawNightSky(W, H, v, k, wx) {
-  if (k <= .01) return;
-  const line = skyline() || new Float32Array(360);
-  const nl = nearbyLamps(), urban = nl.urban ?? .5;
-  // 天空顏色：藍調時刻深藍 → 全黑夜；地平線附近有城市光害（市區偏橘、陰天更亮）
-  const mix = (a, b, t) => a.map((x, i) => Math.round(x + (b[i] - x) * t));
-  const top = mix([32, 52, 112], [5, 8, 20], k);
-  const glowAmt = urban * (.45 + .55 * wx.cover);
-  const hzc = mix(mix([78, 92, 148], [16, 24, 48], k), [86, 62, 58], glowAmt * k);
-  // 天際線多邊形：畫面上方 → 每 0.5° 的天際線點
-  const fovH = fovOf(v.zoom), pts = [];
-  for (let d = -fovH / 2 - 8; d <= fovH / 2 + 8; d += .5) {
-    const az = v.heading + d, p = project(az, skyEl(line, az), v, W, H);
-    if (p) pts.push(p);
-  }
-  if (pts.length < 2) return;
-  const hz = project(v.heading, 0, v, W, H), hy = hz ? hz.y : H * .6;
-  nctx.save();
-  nctx.globalAlpha = Math.min(.7, k * .9);   // 半透明：行道樹沒有資料，讓樹冠剪影透出來
-  nctx.filter = 'blur(3px)';   // 天際線邊緣柔化，資料對不準時比較不突兀
-  const g = nctx.createLinearGradient(0, Math.min(0, hy - H), 0, hy);
-  g.addColorStop(0, `rgb(${top})`); g.addColorStop(.75, `rgb(${mix(top, hzc, .5)})`); g.addColorStop(1, `rgb(${hzc})`);
-  nctx.fillStyle = g;
-  nctx.beginPath(); nctx.moveTo(pts[0].x, -20);
-  for (const p of pts) nctx.lineTo(p.x, Math.max(-20, p.y));
-  nctx.lineTo(pts[pts.length - 1].x, -20); nctx.closePath(); nctx.fill();
-  nctx.restore();
-  // 星星（畫在濾色層，只在天際線以上）
-  const ml = moonLight().k, starK = k * Math.max(0, 1 - urban * 1.3) * (1 - wx.cover) * (1 - ml * .8) * (1 - wx.haze);
-  if (starK > .05) {
-    for (const st of STARS) {
-      if (st.el <= skyEl(line, st.az) + 1) continue;
-      const p = project(st.az, st.el, v, W, H);
-      if (!p || p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-      gctx.fillStyle = `rgba(235,240,255,${(starK * (.35 + .65 * st.m)).toFixed(3)})`;
-      gctx.fillRect(p.x, p.y, st.m > .85 ? 2 : 1, st.m > .85 ? 2 : 1);
-    }
-  }
-}
 const glowC = $('glow'), gctx = glowC.getContext('2d');
 function drawLight() {
-  const [W, H] = fitCanvas(shadeC); fitCanvas(glowC); fitCanvas(nskyC);
-  sctx.clearRect(0, 0, W, H); gctx.clearRect(0, 0, W, H); nctx.clearRect(0, 0, W, H);
+  const [W, H] = fitCanvas(shadeC); fitCanvas(glowC);
+  sctx.clearRect(0, 0, W, H); gctx.clearRect(0, 0, W, H);
   const panoEl = $('pano');
   if (!state.sv || !state.opts.tint) { panoEl.style.filter = ''; setRain(0); return; }
   if (isCovered()) {
@@ -1742,7 +1675,6 @@ function drawLight() {
   sctx.fillStyle = `rgb(${base.join(',')})`;
   sctx.fillRect(0, 0, W, H);
   drawSkyAndFog(W, H, v, wx, day);
-  drawNightSky(W, H, v, Math.max(0, Math.min(1, (-1 - alt) / 9)), wx);
   drawMoon(W, H, v, wx, alt);
   // 天黑後（太陽低於 -2°）路燈逐漸亮起，-10° 全亮
   drawLamps(W, H, v, lampLevel(), wx, base);
