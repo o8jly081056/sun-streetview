@@ -1537,7 +1537,7 @@ function drawLamps(W, H, v, nightK, wx, base) {
     if (L.hidden) continue;
     const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
     if (!head) continue;
-    const col = L.sodium ? [255, 176, 92] : [255, 226, 192];
+    const col = L.sodium ? [255, 170, 86] : [255, 238, 214];   // 鈉燈橘、LED 中性暖白（台北多已換 LED）
     const k = nightK * Math.min(1, 1.3 * Math.pow(14 / Math.max(L.d, 6), .5));   // 遠的燈照得比較弱
     const foot = project(L.az, Math.atan2(-CAM, L.d) / rad, v, W, H);
     const mid = project(L.az, Math.atan2(L.h * .45 - CAM, L.d) / rad, v, W, H);
@@ -1547,8 +1547,9 @@ function drawLamps(W, H, v, nightK, wx, base) {
       const rx = Math.min(W * 1.2, fp * 14 / L.d * haze), ry = Math.max(rx * .14, Math.min(rx * .7, rx * CAM * 2.2 / L.d));
       sctx.save(); sctx.translate(foot.x, foot.y); sctx.scale(1, ry / rx);
       const g = sctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-      g.addColorStop(0, `rgb(${mixc(col, k)})`);
-      g.addColorStop(.45, `rgb(${mixc(col, k * .62)})`);
+      g.addColorStop(0, `rgb(${mixc(col, Math.min(1, k * 1.15))})`);
+      g.addColorStop(.18, `rgb(${mixc(col, k * .85)})`);
+      g.addColorStop(.5, `rgb(${mixc(col, k * .4)})`);
       g.addColorStop(1, `rgb(${base})`);
       sctx.fillStyle = g; sctx.beginPath(); sctx.arc(0, 0, rx, 0, 7); sctx.fill(); sctx.restore();
     }
@@ -1570,14 +1571,14 @@ function drawLamps(W, H, v, nightK, wx, base) {
     if (L.hidden) continue;
     const head = project(L.az, Math.atan2(L.h - CAM, L.d) / rad, v, W, H);
     if (!head) continue;
-    const col = L.sodium ? '255,176,92' : '255,214,160', near = Math.max(0, 1 - L.d / 90);
+    const col = L.sodium ? '255,170,86' : '255,238,214', near = Math.max(0, 1 - L.d / 90);
     const a = nightK * (.3 + .7 * near);
     const core = Math.max(.8, Math.min(2.5, fp * .05 / L.d)), r = Math.max(4, Math.min(20, fp * .25 / L.d)) * haze;
     const g = gctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, r);
     g.addColorStop(0, `rgba(${col},${(a * .5).toFixed(3)})`);
     g.addColorStop(1, `rgba(${col},0)`);
     gctx.fillStyle = g; gctx.beginPath(); gctx.arc(head.x, head.y, r, 0, 7); gctx.fill();
-    gctx.fillStyle = `rgba(255,212,150,${Math.min(1, a).toFixed(3)})`;
+    gctx.fillStyle = L.sodium ? `rgba(255,200,130,${Math.min(1, a).toFixed(3)})` : `rgba(255,246,230,${Math.min(1, a).toFixed(3)})`;
     gctx.beginPath(); gctx.arc(head.x, head.y, core, 0, 7); gctx.fill();
   }
 }
@@ -1654,7 +1655,7 @@ function drawLight() {
   if (nightK > 0) {
     br += (.95 - br) * nightK; ct += (1.05 - ct) * nightK; sat += (.75 - sat) * nightK;
     const u = nearbyLamps().urban ?? .5;
-    const nightBase = [0, 1, 2].map(i => Math.round([16, 20, 34][i] + ([34, 42, 72][i] - [16, 20, 34][i]) * u));   // 山區更暗、市區有天空光害
+    const nightBase = [0, 1, 2].map(i => Math.round([14, 17, 28][i] + ([42, 42, 54][i] - [14, 17, 28][i]) * u));   // 山區偏藍黑；市區較中性的深灰（光害偏暖）
     // 月光：滿月高掛時整體泛起冷色微光，山區最明顯
     const ml = moonLight().k, moonBase = [70, 82, 118];
     for (let i = 0; i < 3; i++) nightBase[i] = Math.round(nightBase[i] + Math.max(0, moonBase[i] - nightBase[i]) * ml * .75);
@@ -1813,6 +1814,15 @@ function drawSkyAndFog(W, H, v, wx, day) {
   const hz = project(v.heading, 0, v, W, H);
   const hy = hz ? hz.y : H / 2;
   // 照片原本是晴天拍的、有硬影子；陰天時用濾色把暗部提亮，影子變淡、反差變柔
+  // 城市光害：天黑後，市區地平線附近的天空有一層很淡的暖灰光（只是一條光帶，不塗整片天空）
+  const nk = Math.max(0, Math.min(1, (-2 - sunAt(state.minutes).altitude) / 8));
+  const ub = nk > .05 ? (nearbyLamps().urban ?? .5) : 0;
+  if (nk > .05 && ub > .1) {
+    const hz1 = project(v.heading, 0, v, W, H), hy1 = hz1 ? hz1.y : H / 2, a = .16 * nk * ub * (1 + .6 * wx.cover);
+    const g = gctx.createLinearGradient(0, hy1 - H * .3, 0, hy1);
+    g.addColorStop(0, 'rgba(120,100,90,0)'); g.addColorStop(1, `rgba(120,100,90,${a.toFixed(3)})`);
+    gctx.fillStyle = g; gctx.fillRect(0, hy1 - H * .3, W, H * .3);
+  }
   // 霾：地平線附近一層偏暖的灰，越遠越看不清
   if (wx.haze > .02) {
     const hz0 = project(v.heading, 0, v, W, H), hy0 = hz0 ? hz0.y : H / 2, a = wx.haze * .45 * Math.max(.3, day);
